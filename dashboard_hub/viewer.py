@@ -8,6 +8,7 @@ import sys
 import threading
 import webbrowser
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from .config import DashboardEntry, load_config
 from .registry import (
@@ -132,9 +133,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       border-top: 1px solid var(--border);
       margin: 16px 0;
     }
+    body.embed #status-bar { display: none; }
+    body.embed #app { padding-top: 20px; }
   </style>
 </head>
-<body>
+<body class="{{EMBED_CLASS}}">
   <div id="status-bar">
     <span><span id="dot" class="dot"></span><span id="status-text">Connecting...</span></span>
     <span id="last-updated"></span>
@@ -202,17 +205,19 @@ class ViewerHandler(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        if self.path == "/":
-            self._serve_html()
-        elif self.path == "/api/dashboard":
+        parsed = urlparse(self.path)
+        if parsed.path == "/":
+            embed = parse_qs(parsed.query).get("embed", ["0"])[0] == "1"
+            self._serve_html(embed=embed)
+        elif parsed.path == "/api/dashboard":
             self._serve_markdown()
-        elif self.path == "/api/mtime":
+        elif parsed.path == "/api/mtime":
             self._serve_mtime()
         else:
             self.send_error(404)
 
-    def _serve_html(self):
-        body = HTML_TEMPLATE.encode("utf-8")
+    def _serve_html(self, *, embed: bool = False):
+        body = HTML_TEMPLATE.replace("{{EMBED_CLASS}}", "embed" if embed else "").encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

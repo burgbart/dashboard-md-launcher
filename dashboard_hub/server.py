@@ -29,94 +29,255 @@ HUB_HTML = """<!DOCTYPE html>
       --heading: #e6edf3;
       --accent: #58a6ff;
       --muted: #8b949e;
-      --ok-text: #3fb950;
+      --ok: #3fb950;
       --idle: #6e7681;
+      --sidebar-width: 280px;
+      --sidebar-collapsed: 56px;
+      --header-height: 52px;
     }
     * { box-sizing: border-box; }
-    body {
+    html, body {
       margin: 0;
+      height: 100%;
       background: var(--bg);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      line-height: 1.5;
     }
-    .wrap { max-width: 960px; margin: 0 auto; padding: 32px 20px 48px; }
-    h1 { color: var(--heading); font-size: 1.75rem; margin: 0 0 8px; }
-    .subtitle { color: var(--muted); margin-bottom: 24px; }
-    .toolbar { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; }
-    input[type="search"] {
-      flex: 1;
+    button, input {
+      font: inherit;
+    }
+    .shell {
+      display: grid;
+      grid-template-columns: var(--sidebar-width) 1fr;
+      height: 100vh;
+      transition: grid-template-columns 0.2s ease;
+    }
+    .shell.collapsed {
+      grid-template-columns: var(--sidebar-collapsed) 1fr;
+    }
+    .sidebar {
       background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .sidebar-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+      min-height: var(--header-height);
+    }
+    .icon-btn {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--heading);
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+    }
+    .icon-btn:hover { border-color: var(--accent); }
+    .brand {
+      color: var(--heading);
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    .shell.collapsed .brand,
+    .shell.collapsed .sidebar-search,
+    .shell.collapsed .sidebar-foot,
+    .shell.collapsed .nav-meta,
+    .shell.collapsed .nav-name {
+      display: none;
+    }
+    .sidebar-search {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-search input {
+      width: 100%;
+      background: var(--bg);
       border: 1px solid var(--border);
       color: var(--heading);
       border-radius: 8px;
-      padding: 10px 12px;
-      font-size: 14px;
+      padding: 9px 10px;
+      font-size: 13px;
     }
-    input[type="search"]:focus {
+    .sidebar-search input:focus {
       outline: none;
       border-color: var(--accent);
       box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
     }
-    .meta { color: var(--muted); font-size: 13px; white-space: nowrap; }
-    .list { display: grid; gap: 12px; }
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px 16px;
+    .nav {
+      overflow: auto;
+      padding: 8px;
       display: grid;
-      gap: 8px;
+      gap: 4px;
+      align-content: start;
     }
-    .card-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
-    .card h2 { margin: 0; color: var(--heading); font-size: 1rem; }
-    .badge {
-      font-size: 11px;
+    .nav-item {
+      appearance: none;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 12px;
+      text-align: left;
+      cursor: pointer;
+      display: grid;
+      grid-template-columns: 10px 1fr;
+      gap: 10px;
+      align-items: start;
+      width: 100%;
+    }
+    .nav-item:hover {
+      background: var(--surface-2);
+      border-color: var(--border);
+    }
+    .nav-item.active {
+      background: rgba(88, 166, 255, 0.12);
+      border-color: rgba(88, 166, 255, 0.35);
+    }
+    .nav-item.loading {
+      opacity: 0.7;
+      cursor: wait;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-top: 5px;
+      background: var(--idle);
+      flex: 0 0 auto;
+    }
+    .status-dot.running { background: var(--ok); }
+    .nav-copy { min-width: 0; }
+    .nav-name {
+      color: var(--heading);
+      font-size: 13px;
       font-weight: 600;
-      letter-spacing: 0.02em;
-      text-transform: uppercase;
-      border-radius: 999px;
-      padding: 4px 8px;
       white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    .badge.running { background: rgba(35, 134, 54, 0.2); color: var(--ok-text); }
-    .badge.stopped { background: rgba(110, 118, 129, 0.2); color: var(--idle); }
-    .path {
+    .nav-meta {
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+    .shell.collapsed .nav-item {
+      grid-template-columns: 1fr;
+      justify-items: center;
+      padding: 10px 8px;
+    }
+    .shell.collapsed .status-dot {
+      margin-top: 0;
+    }
+    .sidebar-foot {
+      border-top: 1px solid var(--border);
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .main {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-width: 0;
+      min-height: 0;
+      background: var(--bg);
+    }
+    .main-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      min-height: var(--header-height);
+      background: var(--surface);
+    }
+    .main-head.hidden { display: none; }
+    .main-title h1 {
+      margin: 0;
+      color: var(--heading);
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .main-title .path {
       color: var(--muted);
       font-size: 12px;
       font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      word-break: break-all;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 60vw;
     }
-    .desc { color: var(--text); font-size: 13px; }
-    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-    button, .link-btn {
+    .main-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .btn {
       appearance: none;
       border: 1px solid var(--border);
       background: var(--surface-2);
       color: var(--heading);
       border-radius: 8px;
-      padding: 8px 12px;
-      font-size: 13px;
+      padding: 7px 11px;
+      font-size: 12px;
       cursor: pointer;
       text-decoration: none;
       display: inline-flex;
       align-items: center;
     }
-    button.primary, .link-btn.primary {
-      background: var(--accent);
-      border-color: var(--accent);
-      color: #0d1117;
-      font-weight: 600;
+    .btn:hover { border-color: var(--accent); }
+    .pane {
+      position: relative;
+      min-height: 0;
     }
-    button:disabled { opacity: 0.6; cursor: wait; }
-    .empty {
-      border: 1px dashed var(--border);
-      border-radius: 10px;
-      padding: 28px;
-      color: var(--muted);
+    .empty-state,
+    .loading-state {
+      height: 100%;
+      display: grid;
+      place-content: center;
       text-align: center;
+      color: var(--muted);
+      padding: 24px;
+      gap: 8px;
     }
-    .empty code { color: var(--heading); }
+    .empty-state code,
+    .loading-state strong {
+      color: var(--heading);
+    }
+    .hidden { display: none !important; }
+    .frame {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: var(--bg);
+    }
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .toast {
       position: fixed;
       right: 20px;
@@ -130,33 +291,83 @@ HUB_HTML = """<!DOCTYPE html>
       transform: translateY(8px);
       transition: all 0.2s ease;
       pointer-events: none;
+      z-index: 20;
     }
     .toast.show { opacity: 1; transform: translateY(0); }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>Dashboards</h1>
-    <p class="subtitle">Configured dashboards on this laptop. Search, open, or start on demand.</p>
-    <div class="toolbar">
-      <input id="search" type="search" placeholder="Search by name, id, path, or description..." autofocus>
-      <span id="count" class="meta"></span>
-    </div>
-    <div id="list" class="list"></div>
+  <div id="shell" class="shell">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <button id="toggle-sidebar" class="icon-btn" type="button" title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+        <span class="brand">Dashboards</span>
+      </div>
+      <div class="sidebar-search">
+        <input id="search" type="search" placeholder="Search projects..." autofocus>
+      </div>
+      <nav id="nav" class="nav"></nav>
+      <div id="sidebar-count" class="sidebar-foot"></div>
+    </aside>
+    <main class="main">
+      <header id="main-head" class="main-head hidden">
+        <div class="main-title">
+          <h1 id="main-name"></h1>
+          <div id="main-path" class="path"></div>
+        </div>
+        <div class="main-actions">
+          <button id="reload-frame" class="btn" type="button">Reload</button>
+          <a id="open-tab" class="btn" href="#" target="_blank" rel="noopener">Open tab</a>
+        </div>
+      </header>
+      <div class="pane">
+        <div id="empty" class="empty-state">
+          <strong>Select a dashboard</strong>
+          <div>Choose a project from the sidebar to load it here.</div>
+          <div>Add projects with <code>dashboard-hub add "Name" ~/path/to/project</code></div>
+        </div>
+        <div id="loading" class="loading-state hidden">
+          <div class="spinner"></div>
+          <strong id="loading-label">Starting dashboard...</strong>
+        </div>
+        <iframe id="frame" class="frame hidden" title="Dashboard" sandbox="allow-same-origin allow-scripts allow-forms allow-popups"></iframe>
+      </div>
+    </main>
   </div>
   <div id="toast" class="toast"></div>
   <script>
-    const listEl = document.getElementById('list');
+    const shellEl = document.getElementById('shell');
     const searchEl = document.getElementById('search');
-    const countEl = document.getElementById('count');
+    const navEl = document.getElementById('nav');
+    const countEl = document.getElementById('sidebar-count');
+    const mainHeadEl = document.getElementById('main-head');
+    const mainNameEl = document.getElementById('main-name');
+    const mainPathEl = document.getElementById('main-path');
+    const emptyEl = document.getElementById('empty');
+    const loadingEl = document.getElementById('loading');
+    const loadingLabelEl = document.getElementById('loading-label');
+    const frameEl = document.getElementById('frame');
+    const openTabEl = document.getElementById('open-tab');
     const toastEl = document.getElementById('toast');
+
     let dashboards = [];
+    let selectedId = null;
+    let currentUrl = null;
+    let selecting = false;
 
     function showToast(message) {
       toastEl.textContent = message;
       toastEl.classList.add('show');
       clearTimeout(showToast._timer);
       showToast._timer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
     }
 
     function matches(entry, query) {
@@ -168,82 +379,156 @@ HUB_HTML = """<!DOCTYPE html>
       return haystack.includes(query);
     }
 
-    function escapeHtml(value) {
-      return String(value)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;');
+    function setCollapsed(collapsed) {
+      shellEl.classList.toggle('collapsed', collapsed);
+      localStorage.setItem('dashboard-hub-sidebar-collapsed', collapsed ? '1' : '0');
     }
 
-    function render() {
+    function readCollapsed() {
+      return localStorage.getItem('dashboard-hub-sidebar-collapsed') === '1';
+    }
+
+    function updateUrl(id) {
+      const url = new URL(window.location.href);
+      if (id) {
+        url.searchParams.set('id', id);
+      } else {
+        url.searchParams.delete('id');
+      }
+      history.replaceState({}, '', url);
+    }
+
+    function showEmpty() {
+      emptyEl.classList.remove('hidden');
+      loadingEl.classList.add('hidden');
+      frameEl.classList.add('hidden');
+      mainHeadEl.classList.add('hidden');
+      frameEl.removeAttribute('src');
+      currentUrl = null;
+    }
+
+    function showLoading(label) {
+      emptyEl.classList.add('hidden');
+      loadingEl.classList.remove('hidden');
+      frameEl.classList.add('hidden');
+      loadingLabelEl.textContent = label;
+    }
+
+    function showFrame(url, entry) {
+      emptyEl.classList.add('hidden');
+      loadingEl.classList.add('hidden');
+      frameEl.classList.remove('hidden');
+      mainHeadEl.classList.remove('hidden');
+      mainNameEl.textContent = entry.name;
+      mainPathEl.textContent = entry.path;
+      currentUrl = url;
+      openTabEl.href = url;
+      if (frameEl.src !== url) {
+        frameEl.src = url;
+      }
+    }
+
+    function renderNav() {
       const query = searchEl.value.trim().toLowerCase();
       const visible = dashboards.filter((entry) => matches(entry, query));
-      countEl.textContent = `${visible.length} of ${dashboards.length}`;
+      countEl.textContent = dashboards.length
+        ? `${visible.length} of ${dashboards.length}`
+        : 'No dashboards configured';
 
       if (!dashboards.length) {
-        listEl.innerHTML = '<div class="empty">No dashboards configured yet.<br>Add one with <code>dashboard-hub add "My Project" ~/path/to/project</code></div>';
+        navEl.innerHTML = '<div class="empty-state" style="height:auto;padding:16px 8px;">Add one with <code>dashboard-hub add</code></div>';
         return;
       }
       if (!visible.length) {
-        listEl.innerHTML = '<div class="empty">No dashboards match your search.</div>';
+        navEl.innerHTML = '<div class="empty-state" style="height:auto;padding:16px 8px;">No matches</div>';
         return;
       }
 
-      listEl.innerHTML = visible.map((entry) => {
-        const status = entry.running ? 'running' : 'stopped';
-        const statusLabel = entry.running ? 'Running' : 'Stopped';
-        const openLabel = entry.running ? 'Open' : 'Start & Open';
-        const openUrl = entry.url || '#';
-        return `
-          <article class="card" data-id="${entry.id}">
-            <div class="card-head">
-              <h2>${escapeHtml(entry.name)}</h2>
-              <span class="badge ${status}">${statusLabel}</span>
-            </div>
-            <div class="path">${escapeHtml(entry.path)}</div>
-            ${entry.description ? `<div class="desc">${escapeHtml(entry.description)}</div>` : ''}
-            <div class="actions">
-              <button class="primary" data-action="open" data-id="${entry.id}">${openLabel}</button>
-              ${entry.running ? `<a class="link-btn" href="${escapeHtml(openUrl)}" target="_blank" rel="noopener">Open in new tab</a>` : ''}
-            </div>
-          </article>
-        `;
-      }).join('');
+      navEl.innerHTML = visible.map((entry) => `
+        <button
+          type="button"
+          class="nav-item ${entry.id === selectedId ? 'active' : ''} ${selecting && entry.id === selectedId ? 'loading' : ''}"
+          data-id="${escapeHtml(entry.id)}"
+          title="${escapeHtml(entry.name)}"
+        >
+          <span class="status-dot ${entry.running ? 'running' : ''}"></span>
+          <span class="nav-copy">
+            <span class="nav-name">${escapeHtml(entry.name)}</span>
+            <span class="nav-meta">${escapeHtml(entry.running ? 'Running' : 'Stopped')} · ${escapeHtml(entry.id)}</span>
+          </span>
+        </button>
+      `).join('');
     }
 
     async function refresh() {
       const res = await fetch('/api/dashboards');
       dashboards = await res.json();
-      render();
+      renderNav();
     }
 
-    async function openDashboard(id, button) {
-      button.disabled = true;
+    async function selectDashboard(id) {
+      if (selecting && id === selectedId) return;
+      const entry = dashboards.find((item) => item.id === id);
+      if (!entry) return;
+
+      selecting = true;
+      selectedId = id;
+      updateUrl(id);
+      renderNav();
+      showLoading(entry.running ? 'Loading dashboard...' : 'Starting dashboard...');
+
       try {
         const res = await fetch(`/api/dashboards/${encodeURIComponent(id)}/open`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to open dashboard');
-        showToast(data.started ? 'Started dashboard' : 'Opened dashboard');
-        window.open(data.url, '_blank', 'noopener');
+        const embedUrl = data.url + (data.url.includes('?') ? '&' : '?') + 'embed=1';
+        showFrame(embedUrl, entry);
+        if (data.started) showToast('Started ' + entry.name);
         await refresh();
       } catch (error) {
+        selectedId = null;
+        updateUrl(null);
+        showEmpty();
         showToast(error.message);
+        await refresh();
       } finally {
-        button.disabled = false;
+        selecting = false;
+        renderNav();
       }
     }
 
-    listEl.addEventListener('click', (event) => {
+    document.getElementById('toggle-sidebar').addEventListener('click', () => {
+      setCollapsed(!shellEl.classList.contains('collapsed'));
+    });
+
+    navEl.addEventListener('click', (event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
-      if (target.dataset.action === 'open') {
-        openDashboard(target.dataset.id, target);
+      const button = target.closest('[data-id]');
+      if (!(button instanceof HTMLElement)) return;
+      selectDashboard(button.dataset.id);
+    });
+
+    searchEl.addEventListener('input', renderNav);
+    searchEl.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      const query = searchEl.value.trim().toLowerCase();
+      const visible = dashboards.filter((entry) => matches(entry, query));
+      if (visible.length === 1) {
+        selectDashboard(visible[0].id);
       }
     });
 
-    searchEl.addEventListener('input', render);
-    refresh();
+    document.getElementById('reload-frame').addEventListener('click', () => {
+      if (!currentUrl) return;
+      frameEl.src = currentUrl;
+    });
+
+    setCollapsed(readCollapsed());
+    refresh().then(() => {
+      const id = new URL(window.location.href).searchParams.get('id');
+      if (id) selectDashboard(id);
+    });
     setInterval(refresh, 3000);
   </script>
 </body>

@@ -6,7 +6,7 @@ Each project can keep a simple markdown status board. This tool registers those 
 
 ## Features
 
-- Hub UI with search across name, id, path, description, and status
+- Hub UI with collapsible sidebar, search, and in-page dashboard viewing
 - Config-based registry of dashboards on your machine
 - Start-on-click: opens a running dashboard or launches it first
 - Per-project viewer with live reload when `dashboard.md` changes
@@ -57,7 +57,9 @@ dashboard-hub list
 dashboard-server
 ```
 
-4. Open the hub in your browser, search, and click **Start & Open**.
+4. Open the hub in your browser, pick a project in the sidebar, and it will start if needed.
+
+Deep link a project with `http://127.0.0.1:8786/dashboards/?id=my-project`.
 
 ## Commands
 
@@ -98,10 +100,9 @@ Example config:
 
 ## How it works
 
-1. `dashboard-server` serves a local hub page.
-2. The hub reads configured dashboards and checks which viewers are running.
-3. Clicking **Start & Open** spawns a viewer process if needed, then opens its URL.
-4. Each viewer serves `dashboard.md` from the project directory and polls for file changes.
+1. `dashboard-server` serves a local hub with a searchable sidebar.
+2. Selecting a project starts its viewer if needed, then loads it in the main pane.
+3. Each viewer serves `dashboard.md` with live reload on file changes.
 
 ## Project layout
 
