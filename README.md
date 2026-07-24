@@ -10,6 +10,7 @@ Each project uses a `backlog/` folder (from `backlog init`). The hub embeds the 
 - Config-based registry of Backlog.md projects on your machine
 - Start-on-click: launches `backlog browser` if not already running
 - Reads `default_port` from each project's `backlog/config.yml` when available
+- Project labels from `dashboard-hub/config.yml` with sidebar filter chips
 - Requires the `backlog` CLI (`npm i -g backlog.md` or `brew install backlog-md`)
 
 ## Requirements
@@ -98,6 +99,12 @@ Example config:
 ```
 
 Each project's `backlog/config.yml` may set `default_port` (Backlog.md default: 6420). If that port is busy, the hub picks the next free port in `portRange`.
+
+Optional `dashboard-hub/config.yml` in a project root sets hub metadata (separate from Backlog.md config):
+
+```yaml
+label: Personal
+```
 
 ## How it works
 

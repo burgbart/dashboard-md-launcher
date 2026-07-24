@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from .config import CONFIG_PATH, DashboardEntry, find_dashboard, load_config
 from .git_remote import get_github_url
+from .project_config import read_project_label
 from .registry import find_instance, prune_registry, terminate_instance, unregister_instance
 from .backlog_browser import launch_backlog_browser, resolve_backlog_project
 
@@ -95,6 +96,7 @@ HUB_HTML = """<!DOCTYPE html>
     }
     .shell.collapsed .brand,
     .shell.collapsed .sidebar-search,
+    .shell.collapsed .sidebar-filters,
     .shell.collapsed .sidebar-foot,
     .shell.collapsed .nav-meta,
     .shell.collapsed .nav-name {
@@ -117,6 +119,31 @@ HUB_HTML = """<!DOCTYPE html>
       outline: none;
       border-color: var(--accent);
       box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+    }
+    .sidebar-filters {
+      padding: 0 12px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .filter-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .filter-chip {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .filter-chip:hover { border-color: var(--accent); color: var(--heading); }
+    .filter-chip.active {
+      background: rgba(88, 166, 255, 0.12);
+      border-color: rgba(88, 166, 255, 0.35);
+      color: var(--accent);
     }
     .nav {
       overflow: auto;
@@ -177,6 +204,15 @@ HUB_HTML = """<!DOCTYPE html>
       overflow: hidden;
       text-overflow: ellipsis;
       margin-top: 2px;
+    }
+    .nav-label {
+      display: inline-block;
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-top: 3px;
     }
     .shell.collapsed .nav-item {
       grid-template-columns: 1fr;
@@ -315,6 +351,7 @@ HUB_HTML = """<!DOCTYPE html>
       <div class="sidebar-search">
         <input id="search" type="search" placeholder="Search projects..." autofocus>
       </div>
+      <div id="label-filters" class="sidebar-filters hidden"></div>
       <nav id="nav" class="nav"></nav>
       <div id="sidebar-count" class="sidebar-foot"></div>
     </aside>
@@ -351,6 +388,7 @@ HUB_HTML = """<!DOCTYPE html>
   <script>
     const shellEl = document.getElementById('shell');
     const searchEl = document.getElementById('search');
+    const labelFiltersEl = document.getElementById('label-filters');
     const navEl = document.getElementById('nav');
     const countEl = document.getElementById('sidebar-count');
     const mainHeadEl = document.getElementById('main-head');
@@ -369,6 +407,7 @@ HUB_HTML = """<!DOCTYPE html>
     const defaultEmptyHtml = emptyEl.innerHTML;
 
     let dashboards = [];
+    let selectedLabel = null;
     let selectedId = null;
     let currentUrl = null;
     let selecting = false;
@@ -389,13 +428,41 @@ HUB_HTML = """<!DOCTYPE html>
         .replaceAll('"', '&quot;');
     }
 
-    function matches(entry, query) {
+    function matches(entry, query, label) {
+      if (label && entry.label !== label) return false;
       if (!query) return true;
       const haystack = [
         entry.id, entry.name, entry.path, entry.description || '',
-        entry.running ? 'running' : 'stopped',
+        entry.label || '', entry.running ? 'running' : 'stopped',
       ].join(' ').toLowerCase();
       return haystack.includes(query);
+    }
+
+    function uniqueLabels() {
+      return [...new Set(
+        dashboards.map((entry) => entry.label).filter(Boolean)
+      )].sort((a, b) => a.localeCompare(b));
+    }
+
+    function renderLabelFilters() {
+      const labels = uniqueLabels();
+      if (!labels.length) {
+        labelFiltersEl.classList.add('hidden');
+        labelFiltersEl.innerHTML = '';
+        return;
+      }
+      labelFiltersEl.classList.remove('hidden');
+      const chips = [
+        `<button type="button" class="filter-chip ${selectedLabel ? '' : 'active'}" data-label="">All</button>`,
+        ...labels.map((label) => `
+          <button
+            type="button"
+            class="filter-chip ${selectedLabel === label ? 'active' : ''}"
+            data-label="${escapeHtml(label)}"
+          >${escapeHtml(label)}</button>
+        `),
+      ];
+      labelFiltersEl.innerHTML = `<div class="filter-chips">${chips.join('')}</div>`;
     }
 
     function setCollapsed(collapsed) {
@@ -509,7 +576,8 @@ HUB_HTML = """<!DOCTYPE html>
 
     function renderNav() {
       const query = searchEl.value.trim().toLowerCase();
-      const visible = dashboards.filter((entry) => matches(entry, query));
+      const visible = dashboards.filter((entry) => matches(entry, query, selectedLabel));
+      renderLabelFilters();
       countEl.textContent = dashboards.length
         ? `${visible.length} of ${dashboards.length}`
         : 'No dashboards configured';
@@ -533,6 +601,7 @@ HUB_HTML = """<!DOCTYPE html>
           <span class="status-dot ${entry.running ? 'running' : ''}"></span>
           <span class="nav-copy">
             <span class="nav-name">${escapeHtml(entry.name)}</span>
+            ${entry.label ? `<span class="nav-label">${escapeHtml(entry.label)}</span>` : ''}
             <span class="nav-meta">${escapeHtml(entry.running ? 'Running' : 'Stopped')} · ${escapeHtml(entry.id)}</span>
           </span>
         </button>
@@ -599,10 +668,18 @@ HUB_HTML = """<!DOCTYPE html>
     });
 
     searchEl.addEventListener('input', renderNav);
+    labelFiltersEl.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const button = target.closest('[data-label]');
+      if (!(button instanceof HTMLElement)) return;
+      selectedLabel = button.dataset.label || null;
+      renderNav();
+    });
     searchEl.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter') return;
       const query = searchEl.value.trim().toLowerCase();
-      const visible = dashboards.filter((entry) => matches(entry, query));
+      const visible = dashboards.filter((entry) => matches(entry, query, selectedLabel));
       if (visible.length === 1) {
         selectDashboard(visible[0].id);
       }
@@ -699,6 +776,7 @@ class HubHandler(BaseHTTPRequestHandler):
             "url": instance.url if instance else None,
             "port": instance.port if instance else None,
             "githubUrl": get_github_url(entry.path),
+            "label": read_project_label(entry.path),
         }
 
     def _open_dashboard(self, dashboard_id: str):

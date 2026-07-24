@@ -13,6 +13,7 @@ from .backlog_browser import (
     run_backlog_browser,
 )
 from .config import CONFIG_PATH, DashboardEntry, find_dashboard, load_config, save_config, slugify
+from .project_config import read_project_label
 from .registry import find_instance, prune_registry
 from .server import run_server
 
@@ -99,7 +100,9 @@ def cmd_list(args: argparse.Namespace) -> None:
         instance = find_instance(entry.id)
         status = "running" if instance else "stopped"
         url = f" ({instance.url})" if instance else ""
-        print(f"- {entry.id}: {entry.name} [{status}]{url}")
+        label = read_project_label(entry.path)
+        label_suffix = f" ({label})" if label else ""
+        print(f"- {entry.id}: {entry.name}{label_suffix} [{status}]{url}")
         print(f"  {entry.path}")
         if entry.description:
             print(f"  {entry.description}")

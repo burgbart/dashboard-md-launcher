@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-24
+
+### Added
+
+- Project labels via `dashboard-hub/config.yml` (`label` field)
+- Label badges in the hub sidebar and filter chips to narrow the project list
+- `dashboard-hub list` shows labels when configured
+
 ## [0.3.0] - 2026-07-24
 
 ### Changed
@@ -50,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime registry for tracking active viewer instances and ports
 - Zero third-party dependencies (Python 3 standard library only)
 
+[0.4.0]: https://github.com/burgbart/dashboard-md-launcher/releases/tag/v0.4.0
 [0.3.0]: https://github.com/burgbart/dashboard-md-launcher/releases/tag/v0.3.0
 [0.2.1]: https://github.com/burgbart/dashboard-md-launcher/releases/tag/v0.2.1
 [0.2.0]: https://github.com/burgbart/dashboard-md-launcher/releases/tag/v0.2.0

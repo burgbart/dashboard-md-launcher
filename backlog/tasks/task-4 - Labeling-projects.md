@@ -1,7 +1,7 @@
 ---
 id: TASK-4
 title: Labeling projects
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-24 09:56'
 labels: []
