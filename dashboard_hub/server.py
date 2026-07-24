@@ -10,7 +10,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .config import CONFIG_PATH, DashboardEntry, find_dashboard, load_config
-from .registry import find_instance, prune_registry
+from .git_remote import get_github_url
+from .registry import find_instance, prune_registry, terminate_instance, unregister_instance
 from .backlog_browser import launch_backlog_browser, resolve_backlog_project
 
 HUB_HTML = """<!DOCTYPE html>
@@ -243,6 +244,14 @@ HUB_HTML = """<!DOCTYPE html>
       align-items: center;
     }
     .btn:hover { border-color: var(--accent); }
+    .btn-danger {
+      border-color: rgba(248, 81, 73, 0.45);
+      color: #f85149;
+    }
+    .btn-danger:hover {
+      border-color: #f85149;
+      background: rgba(248, 81, 73, 0.12);
+    }
     .pane {
       position: relative;
       min-height: 0;
@@ -316,6 +325,9 @@ HUB_HTML = """<!DOCTYPE html>
           <div id="main-path" class="path"></div>
         </div>
         <div class="main-actions">
+          <a id="open-github" class="btn hidden" href="#" target="_blank" rel="noopener">GitHub</a>
+          <a id="open-cursor" class="btn" href="#">Open in Cursor</a>
+          <button id="stop-dashboard" class="btn btn-danger hidden" type="button">Stop</button>
           <button id="reload-frame" class="btn" type="button">Reload</button>
           <a id="open-tab" class="btn" href="#" target="_blank" rel="noopener">Open tab</a>
         </div>
@@ -348,13 +360,19 @@ HUB_HTML = """<!DOCTYPE html>
     const loadingEl = document.getElementById('loading');
     const loadingLabelEl = document.getElementById('loading-label');
     const frameEl = document.getElementById('frame');
+    const openGithubEl = document.getElementById('open-github');
+    const openCursorEl = document.getElementById('open-cursor');
     const openTabEl = document.getElementById('open-tab');
+    const stopBtnEl = document.getElementById('stop-dashboard');
     const toastEl = document.getElementById('toast');
+
+    const defaultEmptyHtml = emptyEl.innerHTML;
 
     let dashboards = [];
     let selectedId = null;
     let currentUrl = null;
     let selecting = false;
+    let selectingPollTimer = null;
 
     function showToast(message) {
       toastEl.textContent = message;
@@ -399,13 +417,53 @@ HUB_HTML = """<!DOCTYPE html>
       history.replaceState({}, '', url);
     }
 
+    function cursorOpenUrl(projectPath) {
+      return 'cursor://file' + encodeURI(projectPath);
+    }
+
+    function updateHeaderActions(entry) {
+      if (entry.githubUrl) {
+        openGithubEl.href = entry.githubUrl;
+        openGithubEl.classList.remove('hidden');
+      } else {
+        openGithubEl.classList.add('hidden');
+      }
+      openCursorEl.href = cursorOpenUrl(entry.path);
+    }
+
+    function updateStopButton() {
+      const entry = dashboards.find((item) => item.id === selectedId);
+      const show = Boolean(entry && entry.running && currentUrl);
+      stopBtnEl.classList.toggle('hidden', !show);
+    }
+
     function showEmpty() {
+      emptyEl.innerHTML = defaultEmptyHtml;
       emptyEl.classList.remove('hidden');
       loadingEl.classList.add('hidden');
       frameEl.classList.add('hidden');
       mainHeadEl.classList.add('hidden');
       frameEl.removeAttribute('src');
       currentUrl = null;
+      updateStopButton();
+    }
+
+    function showStopped(entry) {
+      emptyEl.innerHTML = `
+        <strong>${escapeHtml(entry.name)} stopped</strong>
+        <div>Select it again in the sidebar to restart.</div>
+      `;
+      emptyEl.classList.remove('hidden');
+      loadingEl.classList.add('hidden');
+      frameEl.classList.add('hidden');
+      frameEl.removeAttribute('src');
+      currentUrl = null;
+      mainHeadEl.classList.remove('hidden');
+      mainNameEl.textContent = entry.name;
+      mainPathEl.textContent = entry.path;
+      updateHeaderActions(entry);
+      openTabEl.href = '#';
+      updateStopButton();
     }
 
     function showLoading(label) {
@@ -423,10 +481,30 @@ HUB_HTML = """<!DOCTYPE html>
       mainNameEl.textContent = entry.name;
       mainPathEl.textContent = entry.path;
       currentUrl = url;
+      updateHeaderActions(entry);
       openTabEl.href = url;
       if (frameEl.src !== url) {
         frameEl.src = url;
       }
+      updateStopButton();
+    }
+
+    function updateDashboardLocal(id, patch) {
+      const entry = dashboards.find((item) => item.id === id);
+      if (!entry) return;
+      Object.assign(entry, patch);
+      renderNav();
+    }
+
+    function startSelectingPoll() {
+      if (selectingPollTimer) return;
+      selectingPollTimer = setInterval(refresh, 500);
+    }
+
+    function stopSelectingPoll() {
+      if (!selectingPollTimer) return;
+      clearInterval(selectingPollTimer);
+      selectingPollTimer = null;
     }
 
     function renderNav() {
@@ -465,6 +543,7 @@ HUB_HTML = """<!DOCTYPE html>
       const res = await fetch('/api/dashboards');
       dashboards = await res.json();
       renderNav();
+      updateStopButton();
     }
 
     async function selectDashboard(id) {
@@ -472,19 +551,27 @@ HUB_HTML = """<!DOCTYPE html>
       const entry = dashboards.find((item) => item.id === id);
       if (!entry) return;
 
+      const needsStart = !entry.running;
       selecting = true;
       selectedId = id;
       updateUrl(id);
       renderNav();
-      showLoading(entry.running ? 'Loading backlog...' : 'Starting backlog browser...');
+      showLoading(needsStart ? 'Starting backlog browser...' : 'Loading backlog...');
+      if (needsStart) {
+        startSelectingPoll();
+        refresh();
+      }
 
       try {
         const res = await fetch(`/api/dashboards/${encodeURIComponent(id)}/open`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to open dashboard');
         const embedUrl = data.url;
+        if (data.started) {
+          updateDashboardLocal(id, { running: true, url: embedUrl });
+          showToast('Started ' + entry.name);
+        }
         showFrame(embedUrl, entry);
-        if (data.started) showToast('Started ' + entry.name);
         await refresh();
       } catch (error) {
         selectedId = null;
@@ -494,6 +581,7 @@ HUB_HTML = """<!DOCTYPE html>
         await refresh();
       } finally {
         selecting = false;
+        stopSelectingPoll();
         renderNav();
       }
     }
@@ -523,6 +611,27 @@ HUB_HTML = """<!DOCTYPE html>
     document.getElementById('reload-frame').addEventListener('click', () => {
       if (!currentUrl) return;
       frameEl.src = currentUrl;
+    });
+
+    stopBtnEl.addEventListener('click', async () => {
+      if (!selectedId || !currentUrl) return;
+      const entry = dashboards.find((item) => item.id === selectedId);
+      if (!entry || !entry.running) return;
+
+      stopBtnEl.disabled = true;
+      try {
+        const res = await fetch(`/api/dashboards/${encodeURIComponent(selectedId)}/stop`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to stop dashboard');
+        showStopped(entry);
+        showToast('Stopped ' + entry.name);
+        await refresh();
+      } catch (error) {
+        showToast(error.message);
+        await refresh();
+      } finally {
+        stopBtnEl.disabled = false;
+      }
     });
 
     setCollapsed(readCollapsed());
@@ -561,10 +670,13 @@ class HubHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         prefix = "/api/dashboards/"
-        suffix = "/open"
-        if parsed.path.startswith(prefix) and parsed.path.endswith(suffix):
-            dashboard_id = parsed.path[len(prefix) : -len(suffix)]
+        if parsed.path.startswith(prefix) and parsed.path.endswith("/open"):
+            dashboard_id = parsed.path[len(prefix) : -len("/open")]
             self._open_dashboard(dashboard_id)
+            return
+        if parsed.path.startswith(prefix) and parsed.path.endswith("/stop"):
+            dashboard_id = parsed.path[len(prefix) : -len("/stop")]
+            self._stop_dashboard(dashboard_id)
             return
         self.send_error(404)
 
@@ -586,6 +698,7 @@ class HubHandler(BaseHTTPRequestHandler):
             "running": instance is not None,
             "url": instance.url if instance else None,
             "port": instance.port if instance else None,
+            "githubUrl": get_github_url(entry.path),
         }
 
     def _open_dashboard(self, dashboard_id: str):
@@ -611,6 +724,22 @@ class HubHandler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": str(exc)})
             return
         self._send_json(200, {"url": instance.url, "started": True})
+
+    def _stop_dashboard(self, dashboard_id: str):
+        config = load_config()
+        entry = find_dashboard(config, dashboard_id)
+        if not entry:
+            self._send_json(404, {"error": f"Unknown dashboard id: {dashboard_id}"})
+            return
+
+        instance = find_instance(entry.id)
+        if not instance:
+            self._send_json(404, {"error": "Dashboard is not running"})
+            return
+
+        terminate_instance(instance)
+        unregister_instance(entry.id)
+        self._send_json(200, {"stopped": True})
 
     def _send_json(self, status: int, payload: dict):
         self._send_bytes(status, "application/json", json.dumps(payload).encode("utf-8"))
