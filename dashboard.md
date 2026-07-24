@@ -27,7 +27,7 @@ Local hub for browsing, searching, and launching `dashboard.md` viewers across p
 
 ## Notes
 
-- Hub: `http://127.0.0.1:8786/dashboards/`
+- Hub: `http://127.0.0.1:17686/dashboards/`
 - Config: `~/.config/dashboard-hub/dashboards.json`
 - Add tickets to **Now** / **Backlog**; move to **Done** when shipped
 

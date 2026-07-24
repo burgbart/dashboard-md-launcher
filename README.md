@@ -39,7 +39,7 @@ Optional hosts entry for a nicer URL:
 127.0.0.1 dashboards.local
 ```
 
-Then open `http://dashboards.local:8786/dashboards/`.
+Then open `http://dashboards.local:17686/dashboards/`.
 
 ## Quick start
 
@@ -59,13 +59,13 @@ dashboard-server
 
 4. Open the hub in your browser, pick a project in the sidebar, and it will start if needed.
 
-Deep link a project with `http://127.0.0.1:8786/dashboards/?id=my-project`.
+Deep link a project with `http://127.0.0.1:17686/dashboards/?id=my-project`.
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
-| `dashboard-server` | Run the hub UI on port 8786 |
+| `dashboard-server` | Run the hub UI on port 17686 |
 | `dashboard-hub add NAME PATH` | Register a project with `dashboard.md` |
 | `dashboard-hub list` | List configured dashboards and running status |
 | `dashboard-hub open ID` | Open a dashboard, starting it if needed |
@@ -85,8 +85,8 @@ Example config:
 
 ```json
 {
-  "hub": { "host": "127.0.0.1", "port": 8786 },
-  "portRange": [8787, 8899],
+  "hub": { "host": "127.0.0.1", "port": 17686 },
+  "portRange": [17687, 17799],
   "dashboards": [
     {
       "id": "my-project",

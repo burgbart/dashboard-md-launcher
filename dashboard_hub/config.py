@@ -11,8 +11,8 @@ CONFIG_PATH = CONFIG_DIR / "dashboards.json"
 STATE_DIR = Path.home() / ".local" / "share" / "dashboard-hub"
 
 DEFAULT_CONFIG = {
-    "hub": {"host": "127.0.0.1", "port": 8786},
-    "portRange": [8787, 8899],
+    "hub": {"host": "127.0.0.1", "port": 17686},
+    "portRange": [17687, 17799],
     "dashboards": [],
 }
 
@@ -20,7 +20,7 @@ DEFAULT_CONFIG = {
 @dataclass
 class HubSettings:
     host: str = "127.0.0.1"
-    port: int = 8786
+    port: int = 17686
 
 
 @dataclass
@@ -51,7 +51,7 @@ class DashboardEntry:
 @dataclass
 class AppConfig:
     hub: HubSettings = field(default_factory=HubSettings)
-    port_range: tuple[int, int] = (8787, 8899)
+    port_range: tuple[int, int] = (17687, 17799)
     dashboards: list[DashboardEntry] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -64,11 +64,11 @@ class AppConfig:
     @classmethod
     def from_dict(cls, data: dict) -> AppConfig:
         hub_data = data.get("hub", {})
-        port_range = data.get("portRange", [8787, 8899])
+        port_range = data.get("portRange", [17687, 17799])
         return cls(
             hub=HubSettings(
                 host=hub_data.get("host", "127.0.0.1"),
-                port=int(hub_data.get("port", 8786)),
+                port=int(hub_data.get("port", 17686)),
             ),
             port_range=(int(port_range[0]), int(port_range[1])),
             dashboards=[DashboardEntry.from_dict(item) for item in data.get("dashboards", [])],
