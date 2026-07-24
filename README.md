@@ -1,25 +1,24 @@
 # dashboard-md-launcher
 
-Browse, search, and launch local [`dashboard.md`](dashboard.md) viewers across projects from one hub page.
+Browse, search, and launch [Backlog.md](https://github.com/MrLesk/Backlog.md) browser UIs across projects from one hub page.
 
-Each project can keep a simple markdown status board. This tool registers those projects in a local config file, shows which dashboards are running, and starts them on demand.
+Each project uses a `backlog/` folder (from `backlog init`). The hub embeds the real Backlog kanban board and starts `backlog browser` on demand.
 
 ## Features
 
-- Hub UI with collapsible sidebar, search, and in-page dashboard viewing
-- Config-based registry of dashboards on your machine
-- Start-on-click: opens a running dashboard or launches it first
-- Per-project viewer with live reload when `dashboard.md` changes
-- No pip dependencies — Python 3 standard library only
+- Hub UI with collapsible sidebar, search, and in-page Backlog board viewing
+- Config-based registry of Backlog.md projects on your machine
+- Start-on-click: launches `backlog browser` if not already running
+- Reads `default_port` from each project's `backlog/config.yml` when available
+- Requires the `backlog` CLI (`npm i -g backlog.md` or `brew install backlog-md`)
 
 ## Requirements
 
 - Python 3.9+
-- macOS or Linux (Windows may work; primarily tested on macOS)
+- [Backlog.md CLI](https://github.com/MrLesk/Backlog.md) on your `PATH`
+- macOS or Linux
 
 ## Install
-
-Clone the repository and add the commands to your `PATH`:
 
 ```bash
 git clone git@github.com:burgbart/dashboard-md-launcher.git
@@ -31,9 +30,7 @@ ln -sf "$(pwd)/bin/dashboard-hub" ~/.local/bin/dashboard-hub
 ln -sf "$(pwd)/bin/dash" ~/.local/bin/dash
 ```
 
-Ensure `~/.local/bin` is on your `PATH`.
-
-Optional hosts entry for a nicer URL:
+Optional hosts entry:
 
 ```text
 127.0.0.1 dashboards.local
@@ -43,7 +40,13 @@ Then open `http://dashboards.local:17686/dashboards/`.
 
 ## Quick start
 
-1. Add a `dashboard.md` file to a project.
+1. Initialize Backlog.md in a project:
+
+```bash
+cd ~/path/to/project
+backlog init "My Project"
+```
+
 2. Register the project:
 
 ```bash
@@ -57,29 +60,25 @@ dashboard-hub list
 dashboard-server
 ```
 
-4. Open the hub in your browser, pick a project in the sidebar, and it will start if needed.
-
-Deep link a project with `http://127.0.0.1:17686/dashboards/?id=my-project`.
+4. Pick a project in the sidebar — the Backlog board loads in the main pane.
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
 | `dashboard-server` | Run the hub UI on port 17686 |
-| `dashboard-hub add NAME PATH` | Register a project with `dashboard.md` |
-| `dashboard-hub list` | List configured dashboards and running status |
-| `dashboard-hub open ID` | Open a dashboard, starting it if needed |
+| `dashboard-hub add NAME PATH` | Register a project with `backlog/config.yml` |
+| `dashboard-hub list` | List configured projects and running status |
+| `dashboard-hub open ID` | Open Backlog browser, starting it if needed |
 | `dashboard-hub remove ID` | Remove from config |
-| `dash [PATH]` | Run `dashboard.md` in the current or given project |
+| `dash [PATH]` | Run `backlog browser` in the current or given project |
 
 ## Config
 
-User-specific files are stored outside the repository:
-
 | File | Purpose |
 |------|---------|
-| `~/.config/dashboard-hub/dashboards.json` | Registered dashboards |
-| `~/.local/share/dashboard-hub/instances.json` | Running viewer instances |
+| `~/.config/dashboard-hub/dashboards.json` | Registered projects |
+| `~/.local/share/dashboard-hub/instances.json` | Running browser instances |
 
 Example config:
 
@@ -98,19 +97,21 @@ Example config:
 }
 ```
 
+Each project's `backlog/config.yml` may set `default_port` (Backlog.md default: 6420). If that port is busy, the hub picks the next free port in `portRange`.
+
 ## How it works
 
 1. `dashboard-server` serves a local hub with a searchable sidebar.
-2. Selecting a project starts its viewer if needed, then loads it in the main pane.
-3. Each viewer serves `dashboard.md` with live reload on file changes.
+2. Selecting a project runs `backlog browser --no-open --port <port>` if needed.
+3. The hub embeds the Backlog web UI in the main pane via iframe.
 
 ## Project layout
 
 ```text
 dashboard-md-launcher/
-├── bin/                 # CLI launchers
-├── dashboard_hub/       # Python package
-├── dashboard.md         # Example dashboard file
+├── bin/
+├── dashboard_hub/
+├── backlog/             # this repo's own Backlog.md data
 ├── CHANGELOG.md
 ├── LICENSE
 └── README.md

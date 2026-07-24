@@ -1,3 +1,3 @@
-"""Local dashboard hub: config registry, per-project viewers, and launcher UI."""
+"""Local hub for Backlog.md projects: config registry, browser launcher, and hub UI."""
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"

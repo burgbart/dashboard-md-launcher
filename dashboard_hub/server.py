@@ -10,8 +10,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .config import CONFIG_PATH, DashboardEntry, find_dashboard, load_config
-from .registry import find_instance, prune_registry, wait_for_instance
-from .viewer import resolve_dashboard_path, spawn_viewer
+from .registry import find_instance, prune_registry
+from .backlog_browser import launch_backlog_browser, resolve_backlog_project
 
 HUB_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -325,6 +325,7 @@ HUB_HTML = """<!DOCTYPE html>
           <strong>Select a dashboard</strong>
           <div>Choose a project from the sidebar to load it here.</div>
           <div>Add projects with <code>dashboard-hub add "Name" ~/path/to/project</code></div>
+          <div>Projects need a Backlog.md setup (<code>backlog/config.yml</code>).</div>
         </div>
         <div id="loading" class="loading-state hidden">
           <div class="spinner"></div>
@@ -475,13 +476,13 @@ HUB_HTML = """<!DOCTYPE html>
       selectedId = id;
       updateUrl(id);
       renderNav();
-      showLoading(entry.running ? 'Loading dashboard...' : 'Starting dashboard...');
+      showLoading(entry.running ? 'Loading backlog...' : 'Starting backlog browser...');
 
       try {
         const res = await fetch(`/api/dashboards/${encodeURIComponent(id)}/open`, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to open dashboard');
-        const embedUrl = data.url + (data.url.includes('?') ? '&' : '?') + 'embed=1';
+        const embedUrl = data.url;
         showFrame(embedUrl, entry);
         if (data.started) showToast('Started ' + entry.name);
         await refresh();
@@ -594,7 +595,7 @@ class HubHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": f"Unknown dashboard id: {dashboard_id}"})
             return
         try:
-            resolve_dashboard_path(entry.path)
+            resolve_backlog_project(entry.path)
         except FileNotFoundError as exc:
             self._send_json(400, {"error": str(exc)})
             return
@@ -604,10 +605,10 @@ class HubHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"url": instance.url, "started": False})
             return
 
-        spawn_viewer(entry)
-        instance = wait_for_instance(entry.id)
-        if not instance:
-            self._send_json(500, {"error": "Dashboard failed to start"})
+        try:
+            instance = launch_backlog_browser(entry)
+        except RuntimeError as exc:
+            self._send_json(500, {"error": str(exc)})
             return
         self._send_json(200, {"url": instance.url, "started": True})
 
