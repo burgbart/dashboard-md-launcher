@@ -7,6 +7,8 @@ from pathlib import Path
 
 from . import __version__
 from .backlog_browser import (
+    choose_port,
+    configured_backlog_port,
     launch_backlog_browser,
     read_backlog_project_name,
     resolve_backlog_project,
@@ -14,7 +16,15 @@ from .backlog_browser import (
 )
 from .config import CONFIG_PATH, DashboardEntry, find_dashboard, load_config, save_config, slugify
 from .project_config import read_project_label
-from .registry import find_instance, prune_registry
+from .registry import (
+    find_instance,
+    instance_healthy,
+    load_registry,
+    process_cwd,
+    process_tree_pids,
+    prune_registry,
+    terminate_process_tree,
+)
 from .server import run_server
 
 
@@ -71,9 +81,11 @@ def cmd_add(args: argparse.Namespace) -> None:
         path=project_path,
         description=args.description or "",
     )
+    entry.port = choose_port(entry, host=config.hub.host)
     config.dashboards.append(entry)
     save_config(config)
     print(f"Added '{entry.name}' as '{entry.id}'")
+    print(f"Assigned port: {entry.port}")
     print(f"Config: {CONFIG_PATH}")
 
 
@@ -137,6 +149,87 @@ def cmd_open(args: argparse.Namespace) -> None:
     print(url)
 
 
+def _backlog_browser_roots() -> list[tuple[int, Path | None]]:
+    try:
+        result = subprocess.run(
+            ["ps", "-axo", "pid=,ppid=,command="],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return []
+
+    processes: dict[int, int] = {}
+    for line in result.stdout.splitlines():
+        fields = line.strip().split(maxsplit=2)
+        if len(fields) != 3 or "backlog browser" not in fields[2]:
+            continue
+        try:
+            processes[int(fields[0])] = int(fields[1])
+        except ValueError:
+            continue
+
+    roots = [pid for pid, parent in processes.items() if parent not in processes]
+    return [(pid, process_cwd(pid)) for pid in sorted(roots)]
+
+
+def cmd_doctor(args: argparse.Namespace) -> None:
+    config = load_config()
+    configured_ports: dict[int, list[DashboardEntry]] = {}
+    for entry in config.dashboards:
+        configured_ports.setdefault(configured_backlog_port(entry.path), []).append(entry)
+
+    collisions = {
+        port: entries
+        for port, entries in configured_ports.items()
+        if len(entries) > 1
+    }
+    if collisions:
+        print("Backlog default-port collisions:")
+        for port, entries in sorted(collisions.items()):
+            assignments = ", ".join(
+                f"{entry.id} -> {entry.port or 'unassigned'}" for entry in entries
+            )
+            print(f"- {port}: {assignments}")
+    else:
+        print("Backlog default-port collisions: none")
+
+    registry = load_registry()
+    healthy = [
+        instance for instance in registry if instance_healthy(instance, config.hub.host)
+    ]
+    stale = [instance for instance in registry if instance not in healthy]
+    print(f"Registry: {len(healthy)} healthy, {len(stale)} stale")
+
+    managed_pids: set[int] = set()
+    for instance in healthy:
+        managed_pids.update(process_tree_pids(instance.pid))
+    project_paths = {entry.path.resolve() for entry in config.dashboards}
+    orphans = [
+        (pid, path)
+        for pid, path in _backlog_browser_roots()
+        if path in project_paths and pid not in managed_pids
+    ]
+    if orphans:
+        print("Orphaned Backlog browsers:")
+        for pid, path in orphans:
+            print(f"- pid {pid}: {path}")
+    else:
+        print("Orphaned Backlog browsers: none")
+
+    if args.clean:
+        for pid, _ in orphans:
+            terminate_process_tree(pid)
+        prune_registry(config.hub.host)
+        print(
+            f"Removed {len(stale)} stale registry entries and "
+            f"terminated {len(orphans)} orphaned process trees."
+        )
+    elif stale or orphans:
+        print("Run `dashboard-hub doctor --clean` to remove stale processes.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dashboard-hub",
@@ -181,6 +274,17 @@ def build_parser() -> argparse.ArgumentParser:
     open_cmd.add_argument("id", help="Project id")
     open_cmd.add_argument("--no-open", action="store_true", help="Print URL only")
     open_cmd.set_defaults(func=cmd_open)
+
+    doctor = subparsers.add_parser(
+        "doctor",
+        help="Check port collisions and orphaned Backlog browser processes",
+    )
+    doctor.add_argument(
+        "--clean",
+        action="store_true",
+        help="Remove stale records and terminate orphaned browser processes",
+    )
+    doctor.set_defaults(func=cmd_doctor)
 
     return parser
 

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
 import signal
+import shutil
 import socket
+import subprocess
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +17,7 @@ from pathlib import Path
 from .config import STATE_DIR, ensure_dirs
 
 REGISTRY_PATH = STATE_DIR / "instances.json"
+REGISTRY_LOCK_PATH = STATE_DIR / ".instances.lock"
 
 
 @dataclass
@@ -74,9 +79,32 @@ def save_registry(instances: list[RunningInstance]) -> None:
     )
 
 
+@contextmanager
+def _registry_lock():
+    """Serialize registry read-modify-write across hub threads and CLI processes."""
+    ensure_dirs()
+    REGISTRY_LOCK_PATH.touch(exist_ok=True)
+    with open(REGISTRY_LOCK_PATH, "w", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _healthy_instances(host: str = "127.0.0.1") -> list[RunningInstance]:
+    return [item for item in load_registry() if instance_healthy(item, host)]
+
+
 def pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    try:
+        waited_pid, _ = os.waitpid(pid, os.WNOHANG)
+        if waited_pid == pid:
+            return False
+    except ChildProcessError:
+        pass
     try:
         os.kill(pid, 0)
     except OSError:
@@ -92,41 +120,189 @@ def port_open(host: str, port: int, timeout: float = 0.2) -> bool:
         return False
 
 
-def instance_healthy(instance: RunningInstance, host: str = "127.0.0.1") -> bool:
-    if not pid_alive(instance.pid):
-        return False
-    return port_open(host, instance.port)
+def process_tree_pids(root_pid: int) -> set[int]:
+    """Return a process and all of its descendants."""
+    try:
+        result = subprocess.run(
+            ["ps", "-axo", "pid=,ppid="],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return {root_pid} if pid_alive(root_pid) else set()
+
+    children: dict[int, list[int]] = {}
+    for line in result.stdout.splitlines():
+        try:
+            pid_text, parent_text = line.split()
+            pid, parent = int(pid_text), int(parent_text)
+        except (ValueError, TypeError):
+            continue
+        children.setdefault(parent, []).append(pid)
+
+    tree: set[int] = set()
+    pending = [root_pid]
+    while pending:
+        pid = pending.pop()
+        if pid in tree:
+            continue
+        tree.add(pid)
+        pending.extend(children.get(pid, ()))
+    return tree
 
 
-def prune_registry(host: str = "127.0.0.1") -> list[RunningInstance]:
-    alive = [item for item in load_registry() if instance_healthy(item, host)]
-    save_registry(alive)
-    return alive
+def process_cwd(pid: int) -> Path | None:
+    proc_cwd = Path("/proc") / str(pid) / "cwd"
+    try:
+        return proc_cwd.resolve(strict=True)
+    except OSError:
+        pass
 
-
-def register_instance(instance: RunningInstance) -> None:
-    instances = prune_registry()
-    instances = [item for item in instances if item.id != instance.id]
-    instances.append(instance)
-    save_registry(instances)
-
-
-def unregister_instance(dashboard_id: str) -> None:
-    instances = [item for item in load_registry() if item.id != dashboard_id]
-    save_registry(instances)
-
-
-def find_instance(dashboard_id: str) -> RunningInstance | None:
-    for item in prune_registry():
-        if item.id == dashboard_id:
-            return item
+    if not shutil.which("lsof"):
+        return None
+    try:
+        result = subprocess.run(
+            ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    for line in result.stdout.splitlines():
+        if line.startswith("n"):
+            return Path(line[1:]).resolve()
     return None
 
 
+def listening_pids(port: int) -> set[int]:
+    """Return PIDs listening on a TCP port using lsof or Linux procfs."""
+    if shutil.which("lsof"):
+        try:
+            result = subprocess.run(
+                ["lsof", "-nP", "-t", f"-iTCP:{port}", "-sTCP:LISTEN"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            return set()
+        return {
+            int(line)
+            for line in result.stdout.splitlines()
+            if line.strip().isdigit()
+        }
+
+    socket_inodes: set[str] = set()
+    for table in (Path("/proc/net/tcp"), Path("/proc/net/tcp6")):
+        try:
+            lines = table.read_text(encoding="utf-8").splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            fields = line.split()
+            if len(fields) > 9 and fields[3] == "0A":
+                try:
+                    local_port = int(fields[1].rsplit(":", 1)[1], 16)
+                except (ValueError, IndexError):
+                    continue
+                if local_port == port:
+                    socket_inodes.add(fields[9])
+
+    owners: set[int] = set()
+    proc = Path("/proc")
+    if not socket_inodes or not proc.exists():
+        return owners
+    for process_dir in proc.iterdir():
+        if not process_dir.name.isdigit():
+            continue
+        fd_dir = process_dir / "fd"
+        try:
+            descriptors = list(fd_dir.iterdir())
+        except OSError:
+            continue
+        for descriptor in descriptors:
+            try:
+                target = os.readlink(descriptor)
+            except OSError:
+                continue
+            match = re.fullmatch(r"socket:\[(\d+)\]", target)
+            if match and match.group(1) in socket_inodes:
+                owners.add(int(process_dir.name))
+                break
+    return owners
+
+
+def process_owns_port(root_pid: int, port: int, project_path: str | Path) -> bool:
+    expected_path = Path(project_path).resolve()
+    tree = process_tree_pids(root_pid)
+    for pid in listening_pids(port):
+        if pid in tree and process_cwd(pid) == expected_path:
+            return True
+    return False
+
+
+def port_serves_project(port: int, project_path: str | Path) -> bool:
+    """Return True when a listener on port is running from the project directory."""
+    expected_path = Path(project_path).resolve()
+    for pid in listening_pids(port):
+        if process_cwd(pid) == expected_path:
+            return True
+    return False
+
+
+def instance_healthy(instance: RunningInstance, host: str = "127.0.0.1") -> bool:
+    if not port_open(host, instance.port):
+        return False
+    if pid_alive(instance.pid) and process_owns_port(
+        instance.pid, instance.port, instance.path
+    ):
+        return True
+    return port_serves_project(instance.port, instance.path)
+
+
+def prune_registry(host: str = "127.0.0.1") -> list[RunningInstance]:
+    with _registry_lock():
+        alive = _healthy_instances(host)
+        save_registry(alive)
+        return alive
+
+
+def register_instance(instance: RunningInstance, host: str = "127.0.0.1") -> None:
+    with _registry_lock():
+        instances = _healthy_instances(host)
+        instances = [item for item in instances if item.id != instance.id]
+        instances.append(instance)
+        save_registry(instances)
+
+
+def unregister_instance(dashboard_id: str) -> None:
+    with _registry_lock():
+        instances = [item for item in load_registry() if item.id != dashboard_id]
+        save_registry(instances)
+
+
+def find_instance(dashboard_id: str, host: str = "127.0.0.1") -> RunningInstance | None:
+    with _registry_lock():
+        alive = _healthy_instances(host)
+        save_registry(alive)
+        for item in alive:
+            if item.id == dashboard_id:
+                return item
+        return None
+
+
+def list_instances(host: str = "127.0.0.1") -> list[RunningInstance]:
+    """Prune stale entries once and return all healthy instances."""
+    return prune_registry(host)
+
+
 def find_free_port(start: int, end: int, host: str = "127.0.0.1") -> int:
-    used = {item.port for item in load_registry()}
+    with _registry_lock():
+        used = {item.port for item in _healthy_instances(host)}
     for port in range(start, end + 1):
-        if port in used:
+        if port in used or port_open(host, port) or listening_pids(port):
             continue
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -153,8 +329,31 @@ def wait_for_instance(
 
 
 def terminate_instance(instance: RunningInstance) -> None:
-    if pid_alive(instance.pid):
+    terminate_process_tree(instance.pid)
+
+
+def terminate_process_tree(root_pid: int, timeout: float = 5.0) -> None:
+    """Terminate descendants before their launcher so no listener is orphaned."""
+    pids = process_tree_pids(root_pid)
+    if not pids:
+        return
+    for pid in sorted(pids - {root_pid}, reverse=True):
         try:
-            os.kill(instance.pid, signal.SIGTERM)
+            os.kill(pid, signal.SIGTERM)
         except OSError:
             pass
+    if root_pid in pids:
+        try:
+            os.kill(root_pid, signal.SIGTERM)
+        except OSError:
+            pass
+
+    deadline = time.time() + timeout
+    while time.time() < deadline and any(pid_alive(pid) for pid in pids):
+        time.sleep(0.05)
+    for pid in pids:
+        if pid_alive(pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass

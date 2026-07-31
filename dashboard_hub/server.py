@@ -11,8 +11,8 @@ from urllib.parse import urlparse
 
 from .config import CONFIG_PATH, DashboardEntry, find_dashboard, load_config
 from .git_remote import get_github_url
-from .project_config import read_project_label
-from .registry import find_instance, prune_registry, terminate_instance, unregister_instance
+from .project_config import compute_short_name, read_project_color, read_project_label, read_project_short_name
+from .registry import find_instance, list_instances, terminate_instance, unregister_instance
 from .backlog_browser import launch_backlog_browser, resolve_backlog_project
 
 HUB_HTML = """<!DOCTYPE html>
@@ -61,7 +61,7 @@ HUB_HTML = """<!DOCTYPE html>
       background: var(--surface);
       border-right: 1px solid var(--border);
       display: grid;
-      grid-template-rows: auto auto 1fr auto;
+      grid-template-rows: auto auto auto 1fr auto;
       min-height: 0;
       overflow: hidden;
     }
@@ -97,9 +97,7 @@ HUB_HTML = """<!DOCTYPE html>
     .shell.collapsed .brand,
     .shell.collapsed .sidebar-search,
     .shell.collapsed .sidebar-filters,
-    .shell.collapsed .sidebar-foot,
-    .shell.collapsed .nav-meta,
-    .shell.collapsed .nav-name {
+    .shell.collapsed .sidebar-foot {
       display: none;
     }
     .sidebar-search {
@@ -121,7 +119,7 @@ HUB_HTML = """<!DOCTYPE html>
       box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
     }
     .sidebar-filters {
-      padding: 0 12px 12px;
+      padding: 12px;
       border-bottom: 1px solid var(--border);
     }
     .filter-chips {
@@ -188,7 +186,7 @@ HUB_HTML = """<!DOCTYPE html>
       flex: 0 0 auto;
     }
     .status-dot.running { background: var(--ok); }
-    .nav-copy { min-width: 0; }
+    .nav-copy { min-width: 0; overflow: hidden; }
     .nav-name {
       color: var(--heading);
       font-size: 13px;
@@ -196,6 +194,7 @@ HUB_HTML = """<!DOCTYPE html>
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      display: block;
     }
     .nav-meta {
       color: var(--muted);
@@ -204,20 +203,40 @@ HUB_HTML = """<!DOCTYPE html>
       overflow: hidden;
       text-overflow: ellipsis;
       margin-top: 2px;
+      display: block;
     }
     .nav-label {
       display: inline-block;
-      color: var(--accent);
       font-size: 10px;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.03em;
       margin-top: 3px;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .nav-short {
+      display: none;
+      font-size: 12px;
+      font-weight: 600;
+      text-align: center;
+      line-height: 1;
     }
     .shell.collapsed .nav-item {
       grid-template-columns: 1fr;
       justify-items: center;
+      gap: 6px;
       padding: 10px 8px;
+    }
+    .shell.collapsed .nav-copy,
+    .shell.collapsed .nav-name,
+    .shell.collapsed .nav-meta {
+      display: none;
+    }
+    .shell.collapsed .nav-short {
+      display: block;
     }
     .shell.collapsed .status-dot {
       margin-top: 0;
@@ -591,21 +610,82 @@ HUB_HTML = """<!DOCTYPE html>
         return;
       }
 
-      navEl.innerHTML = visible.map((entry) => `
-        <button
-          type="button"
-          class="nav-item ${entry.id === selectedId ? 'active' : ''} ${selecting && entry.id === selectedId ? 'loading' : ''}"
-          data-id="${escapeHtml(entry.id)}"
-          title="${escapeHtml(entry.name)}"
-        >
-          <span class="status-dot ${entry.running ? 'running' : ''}"></span>
-          <span class="nav-copy">
-            <span class="nav-name">${escapeHtml(entry.name)}</span>
-            ${entry.label ? `<span class="nav-label">${escapeHtml(entry.label)}</span>` : ''}
-            <span class="nav-meta">${escapeHtml(entry.running ? 'Running' : 'Stopped')} · ${escapeHtml(entry.id)}</span>
-          </span>
-        </button>
-      `).join('');
+      const existingById = new Map();
+      for (const child of [...navEl.children]) {
+        if (child.dataset.id) {
+          existingById.set(child.dataset.id, child);
+        }
+      }
+
+      visible.forEach((entry, index) => {
+        let item = existingById.get(entry.id);
+        const isActive = entry.id === selectedId;
+        const isLoading = selecting && entry.id === selectedId;
+        const runningClass = entry.running ? 'running' : '';
+
+        if (!item) {
+          const classes = ['nav-item'];
+          if (isActive) classes.push('active');
+          if (isLoading) classes.push('loading');
+          item = document.createElement('button');
+          item.type = 'button';
+          item.className = classes.join(' ');
+          item.dataset.id = entry.id;
+          item.title = entry.name;
+          const labelColor = entry.labelColor || 'var(--accent)';
+          item.innerHTML = `
+            <span class="status-dot ${runningClass}"></span>
+            <span class="nav-copy">
+              <span class="nav-name">${escapeHtml(entry.name)}</span>
+              ${entry.label ? `<span class="nav-label" style="color: ${escapeHtml(labelColor)}">${escapeHtml(entry.label)}</span>` : ''}
+              <span class="nav-meta">${escapeHtml(entry.running ? 'Running' : 'Stopped')} · ${escapeHtml(entry.id)}</span>
+            </span>
+            <span class="nav-short" style="color: ${escapeHtml(labelColor)}">${escapeHtml(entry.shortName || '')}</span>
+          `;
+        } else {
+          existingById.delete(entry.id);
+          item.classList.toggle('active', isActive);
+          item.classList.toggle('loading', isLoading);
+          item.title = entry.name;
+          const labelColor = entry.labelColor || 'var(--accent)';
+          const dot = item.querySelector('.status-dot');
+          if (dot) dot.classList.toggle('running', entry.running);
+          const nameEl = item.querySelector('.nav-name');
+          if (nameEl) nameEl.textContent = entry.name;
+          const labelEl = item.querySelector('.nav-label');
+          if (entry.label) {
+            if (labelEl) {
+              labelEl.textContent = entry.label;
+              labelEl.style.color = labelColor;
+            } else {
+              const newLabel = document.createElement('span');
+              newLabel.className = 'nav-label';
+              newLabel.style.color = labelColor;
+              newLabel.textContent = entry.label;
+              const metaEl = item.querySelector('.nav-meta');
+              if (metaEl) metaEl.before(newLabel);
+            }
+          } else if (labelEl) {
+            labelEl.remove();
+          }
+          const metaEl = item.querySelector('.nav-meta');
+          if (metaEl) metaEl.textContent = `${entry.running ? 'Running' : 'Stopped'} · ${entry.id}`;
+          const shortEl = item.querySelector('.nav-short');
+          if (shortEl) {
+            shortEl.textContent = entry.shortName || '';
+            shortEl.style.color = labelColor;
+          }
+        }
+
+        const currentAtIndex = navEl.children[index];
+        if (currentAtIndex !== item) {
+          navEl.insertBefore(item, currentAtIndex || null);
+        }
+      });
+
+      for (const item of existingById.values()) {
+        item.remove();
+      }
     }
 
     async function refresh() {
@@ -762,11 +842,25 @@ class HubHandler(BaseHTTPRequestHandler):
 
     def _serve_dashboards(self):
         config = load_config()
-        payload = [self._serialize_dashboard(entry, config.hub.host) for entry in config.dashboards]
+        host = config.hub.host
+        instances_by_id = {item.id: item for item in list_instances(host)}
+        payload = [
+            self._serialize_dashboard(entry, host, instances_by_id.get(entry.id))
+            for entry in config.dashboards
+        ]
         self._send_bytes(200, "application/json", json.dumps(payload).encode("utf-8"))
 
-    def _serialize_dashboard(self, entry: DashboardEntry, host: str) -> dict:
-        instance = find_instance(entry.id)
+    def _serialize_dashboard(
+        self,
+        entry: DashboardEntry,
+        host: str,
+        instance=None,
+    ) -> dict:
+        if instance is None:
+            instance = find_instance(entry.id, host)
+        label = read_project_label(entry.path)
+        label_color = read_project_color(entry.path)
+        configured_short = read_project_short_name(entry.path)
         return {
             "id": entry.id,
             "name": entry.name,
@@ -776,7 +870,9 @@ class HubHandler(BaseHTTPRequestHandler):
             "url": instance.url if instance else None,
             "port": instance.port if instance else None,
             "githubUrl": get_github_url(entry.path),
-            "label": read_project_label(entry.path),
+            "label": label,
+            "labelColor": label_color,
+            "shortName": compute_short_name(entry.name, configured_short),
         }
 
     def _open_dashboard(self, dashboard_id: str):
@@ -791,7 +887,7 @@ class HubHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": str(exc)})
             return
 
-        instance = find_instance(entry.id)
+        instance = find_instance(entry.id, config.hub.host)
         if instance:
             self._send_json(200, {"url": instance.url, "started": False})
             return
@@ -810,7 +906,7 @@ class HubHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": f"Unknown dashboard id: {dashboard_id}"})
             return
 
-        instance = find_instance(entry.id)
+        instance = find_instance(entry.id, config.hub.host)
         if not instance:
             self._send_json(404, {"error": "Dashboard is not running"})
             return
@@ -838,7 +934,7 @@ def run_server(*, open_browser: bool = True) -> None:
     tool_root = Path(__file__).resolve().parent.parent
 
     HubHandler.context = HubContext(tool_root=tool_root)
-    prune_registry(host)
+    list_instances(host)
 
     try:
         server = ThreadingHTTPServer((host, port), HubHandler)

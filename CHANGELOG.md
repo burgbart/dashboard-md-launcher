@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Project labels via `dashboard-hub/config.yml` (`label` field)
 - Label badges in the hub sidebar and filter chips to narrow the project list
 - `dashboard-hub list` shows labels when configured
+- `dashboard-hub doctor [--clean]` reports port collisions and cleans up orphaned browsers
+
+### Fixed
+
+- Top-align the sidebar project list so it sits directly below the label filters
+- Add padding above label filter chips so they no longer touch the search box
+- Persist unique project ports and verify the spawned process owns its listener
+- Stop complete Backlog browser process trees so child listeners are not orphaned
 
 ## [0.3.0] - 2026-07-24
 

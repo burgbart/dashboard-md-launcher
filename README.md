@@ -72,6 +72,7 @@ dashboard-server
 | `dashboard-hub list` | List configured projects and running status |
 | `dashboard-hub open ID` | Open Backlog browser, starting it if needed |
 | `dashboard-hub remove ID` | Remove from config |
+| `dashboard-hub doctor [--clean]` | Find port collisions and stale browser processes |
 | `dash [PATH]` | Run `backlog browser` in the current or given project |
 
 ## Config
@@ -86,19 +87,26 @@ Example config:
 ```json
 {
   "hub": { "host": "127.0.0.1", "port": 17686 },
-  "portRange": [17687, 17799],
+  "portRange": [49152, 49299],
   "dashboards": [
     {
       "id": "my-project",
       "name": "My Project",
       "path": "/home/you/projects/my-project",
-      "description": "Optional note"
+      "description": "Optional note",
+      "port": 49152
     }
   ]
 }
 ```
 
-Each project's `backlog/config.yml` may set `default_port` (Backlog.md default: 6420). If that port is busy, the hub picks the next free port in `portRange`.
+Each project's `backlog/config.yml` may set `default_port` (Backlog.md default: 6420).
+The hub stores a stable, unique `port` assignment for each project. If a preferred
+port is already assigned or occupied, it picks a free port from `portRange`.
+
+Run `dashboard-hub doctor` to report duplicate defaults, stale registry entries,
+and orphaned `backlog browser` processes. Add `--clean` to terminate orphaned
+process trees belonging to registered projects.
 
 Optional `dashboard-hub/config.yml` in a project root sets hub metadata (separate from Backlog.md config):
 

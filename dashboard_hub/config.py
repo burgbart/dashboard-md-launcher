@@ -12,7 +12,7 @@ STATE_DIR = Path.home() / ".local" / "share" / "dashboard-hub"
 
 DEFAULT_CONFIG = {
     "hub": {"host": "127.0.0.1", "port": 17686},
-    "portRange": [17687, 17799],
+    "portRange": [49152, 49299],
     "dashboards": [],
 }
 
@@ -29,14 +29,18 @@ class DashboardEntry:
     name: str
     path: Path
     description: str = ""
+    port: int | None = None
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "id": self.id,
             "name": self.name,
             "path": str(self.path),
             "description": self.description,
         }
+        if self.port is not None:
+            data["port"] = self.port
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> DashboardEntry:
@@ -45,13 +49,14 @@ class DashboardEntry:
             name=data["name"],
             path=Path(os.path.expanduser(data["path"])).resolve(),
             description=data.get("description", ""),
+            port=int(data["port"]) if data.get("port") is not None else None,
         )
 
 
 @dataclass
 class AppConfig:
     hub: HubSettings = field(default_factory=HubSettings)
-    port_range: tuple[int, int] = (17687, 17799)
+    port_range: tuple[int, int] = (49152, 49299)
     dashboards: list[DashboardEntry] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -64,7 +69,7 @@ class AppConfig:
     @classmethod
     def from_dict(cls, data: dict) -> AppConfig:
         hub_data = data.get("hub", {})
-        port_range = data.get("portRange", [17687, 17799])
+        port_range = data.get("portRange", [49152, 49299])
         return cls(
             hub=HubSettings(
                 host=hub_data.get("host", "127.0.0.1"),

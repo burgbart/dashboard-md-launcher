@@ -4,16 +4,20 @@ import os
 import re
 import shutil
 import subprocess
-import sys
+import threading
+import time
 import webbrowser
 from pathlib import Path
 
-from .config import DashboardEntry, load_config
+from .config import DashboardEntry, load_config, save_config
 from .registry import (
     RunningInstance,
     find_free_port,
+    pid_alive,
     port_open,
+    process_owns_port,
     register_instance,
+    terminate_process_tree,
     unregister_instance,
     utc_now,
 )
@@ -23,6 +27,8 @@ BACKLOG_CONFIG_PATHS = (
     "backlog.config.yml",
     ".backlog/config.yml",
 )
+DEFAULT_BACKLOG_PORT = 6420
+_launch_lock = threading.Lock()
 
 
 def backlog_config_path(project_path: Path) -> Path | None:
@@ -57,6 +63,10 @@ def read_backlog_port(project_path: Path) -> int | None:
     return None
 
 
+def configured_backlog_port(project_path: Path) -> int:
+    return read_backlog_port(project_path) or DEFAULT_BACKLOG_PORT
+
+
 def read_backlog_project_name(project_path: Path) -> str | None:
     config_path = backlog_config_path(project_path)
     if config_path is None:
@@ -76,15 +86,60 @@ def backlog_binary() -> str:
     return binary
 
 
-def choose_port(entry: DashboardEntry, host: str = "127.0.0.1") -> int:
+def _reserved_ports(entry: DashboardEntry) -> set[int]:
     config = load_config()
-    preferred = read_backlog_port(entry.path)
-    if preferred is not None:
+    reserved = {
+        item.port
+        for item in config.dashboards
+        if item.id != entry.id and item.port is not None
+    }
+
+    preferred = configured_backlog_port(entry.path)
+    for item in config.dashboards:
+        if item.id == entry.id:
+            break
+        if item.port is None and configured_backlog_port(item.path) == preferred:
+            reserved.add(preferred)
+            break
+    return reserved
+
+
+def choose_port(
+    entry: DashboardEntry,
+    host: str = "127.0.0.1",
+    *,
+    excluded: set[int] | None = None,
+) -> int:
+    config = load_config()
+    unavailable = _reserved_ports(entry) | (excluded or set())
+    candidates = [entry.port, configured_backlog_port(entry.path)]
+    for candidate in candidates:
+        if candidate is None or candidate in unavailable:
+            continue
         try:
-            return find_free_port(preferred, preferred, host=host)
+            return find_free_port(candidate, candidate, host=host)
         except RuntimeError:
             pass
-    return find_free_port(*config.port_range, host=host)
+    for candidate in range(config.port_range[0], config.port_range[1] + 1):
+        if candidate in unavailable:
+            continue
+        try:
+            return find_free_port(candidate, candidate, host=host)
+        except RuntimeError:
+            continue
+    raise RuntimeError(
+        f"No free port available in range {config.port_range[0]}-{config.port_range[1]}"
+    )
+
+
+def persist_entry_port(entry: DashboardEntry, port: int) -> None:
+    config = load_config()
+    for configured_entry in config.dashboards:
+        if configured_entry.id == entry.id:
+            configured_entry.port = port
+            entry.port = port
+            save_config(config)
+            return
 
 
 def browser_url(host: str, port: int) -> str:
@@ -162,11 +217,7 @@ def run_backlog_browser(
     try:
         exit_code = process.wait()
     except KeyboardInterrupt:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
+        terminate_process_tree(process.pid)
         print("\nStopped.")
         if register:
             unregister_instance(entry.id)
@@ -196,22 +247,45 @@ def start_backlog_browser(entry: DashboardEntry, port: int | None = None) -> Run
 
 
 def launch_backlog_browser(entry: DashboardEntry) -> RunningInstance:
-    import time
-
-    from .registry import pid_alive, port_open, register_instance, unregister_instance
-
     config = load_config()
     host = config.hub.host
-    instance = start_backlog_browser(entry)
-    register_instance(instance)
+    resolve_backlog_project(entry.path)
+    attempted: set[int] = set()
+    errors: list[str] = []
 
-    deadline = time.time() + 20
-    while time.time() < deadline:
-        if pid_alive(instance.pid) and port_open(host, instance.port):
-            return instance
-        if not pid_alive(instance.pid):
-            break
-        time.sleep(0.2)
+    with _launch_lock:
+        for _ in range(3):
+            chosen_port = choose_port(entry, host=host, excluded=attempted)
+            attempted.add(chosen_port)
+            process = spawn_backlog_browser(entry, chosen_port)
+            deadline = time.time() + 20
+
+            while time.time() < deadline:
+                if not pid_alive(process.pid):
+                    errors.append(f"process exited on port {chosen_port}")
+                    break
+                if port_open(host, chosen_port):
+                    if process_owns_port(process.pid, chosen_port, entry.path):
+                        instance = RunningInstance(
+                            id=entry.id,
+                            name=entry.name,
+                            path=str(entry.path),
+                            url=browser_url(host, chosen_port),
+                            port=chosen_port,
+                            pid=process.pid,
+                            started_at=utc_now(),
+                        )
+                        persist_entry_port(entry, chosen_port)
+                        register_instance(instance, host=host)
+                        return instance
+                    errors.append(f"port {chosen_port} is owned by another process")
+                    break
+                time.sleep(0.2)
+            else:
+                errors.append(f"timed out waiting for port {chosen_port}")
+
+            terminate_process_tree(process.pid)
 
     unregister_instance(entry.id)
-    raise RuntimeError("Backlog browser failed to start")
+    detail = "; ".join(errors)
+    raise RuntimeError(f"Backlog browser failed to start ({detail})")

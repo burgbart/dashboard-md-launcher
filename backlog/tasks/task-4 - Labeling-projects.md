@@ -12,5 +12,11 @@ ordinal: 4000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Add the ability to label projects. These projects will be labeled in the dasboard overview and I need to be able to filter on them. Each project can contain a config file in the config.yml (that does not clash with the backlog.md configs) that we use for this label. Then from the current projects, label Mobdevops as Backbase and the other 2 as Personal
+Add the ability to label projects. These projects will be labeled in the dashboard overview and I need to be able to filter on them. Each project can contain a config file in `dashboard-hub/config.yml` (separate from `backlog/config.yml`) that we use for this label.
+
+Initial labels applied:
+- Mobdevops (NMFS): Backbase
+- dashboard-md-launcher: Personal
+- trmnl-family-plugin: Personal
+- SSH Herder: Personal
 <!-- SECTION:DESCRIPTION:END -->
