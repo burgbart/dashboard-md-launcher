@@ -33,6 +33,12 @@ def cmd_server(args: argparse.Namespace) -> None:
     run_server(open_browser=not args.no_open)
 
 
+def cmd_desktop(args: argparse.Namespace) -> None:
+    from .desktop import run_desktop
+
+    run_desktop()
+
+
 def cmd_browser(args: argparse.Namespace) -> None:
     config = load_config()
     entry = find_dashboard(config, args.id)
@@ -282,6 +288,9 @@ def build_parser() -> argparse.ArgumentParser:
     server = subparsers.add_parser("server", help="Run the project hub UI")
     server.add_argument("--no-open", action="store_true", help="Do not open a browser tab")
     server.set_defaults(func=cmd_server)
+
+    desktop = subparsers.add_parser("desktop", help="Run the hub in a native desktop window (requires pywebview)")
+    desktop.set_defaults(func=cmd_desktop)
 
     browser = subparsers.add_parser("browser", help="Run Backlog.md browser for a configured project")
     browser.add_argument("--id", required=True, help="Project id from config")

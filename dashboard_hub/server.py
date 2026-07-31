@@ -927,7 +927,8 @@ class HubHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def run_server(*, open_browser: bool = True) -> None:
+def create_server() -> tuple[ThreadingHTTPServer, str]:
+    """Bind the hub HTTP server and return it together with its URL."""
     config = load_config()
     host = config.hub.host
     port = config.hub.port
@@ -942,7 +943,11 @@ def run_server(*, open_browser: bool = True) -> None:
         print(f"Error: could not bind {host}:{port} ({exc})", file=sys.stderr)
         raise SystemExit(1) from exc
 
-    url = f"http://{host}:{port}/dashboards/"
+    return server, f"http://{host}:{port}/dashboards/"
+
+
+def run_server(*, open_browser: bool = True) -> None:
+    server, url = create_server()
     print(f"Dashboard hub running at {url}")
     print(f"Config: {CONFIG_PATH}")
     print("Press Ctrl+C to stop.")

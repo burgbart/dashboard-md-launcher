@@ -89,11 +89,61 @@ dashboard-server
 
 4. Pick a project in the sidebar — the Backlog board loads in the main pane.
 
+## Desktop app
+
+`dashboard-desktop` runs the same hub UI in a native OS webview window instead
+of a browser tab. Closing the window shuts the hub down and stops all running
+dashboards.
+
+Run from a source checkout (requires `pip install pywebview`):
+
+```bash
+dashboard-desktop
+```
+
+Or build a single-file executable — no installation step, just download and run:
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install pywebview pyinstaller
+.venv/bin/pyinstaller packaging/dashboard-desktop.spec --noconfirm
+# output: dist/dashboard-desktop (dist/dashboard-desktop.exe on Windows)
+# macOS additionally: dist/Dashboard Hub.app — drag it into /Applications
+```
+
+PyInstaller does not cross-compile: the Windows and Linux builds must run on
+Windows and Linux respectively. To make the app "really installed" on each
+platform:
+
+- **macOS**: `Dashboard Hub.app` (built above) — drag into `/Applications`,
+  launch via Spotlight/Launchpad like any app. Optionally wrap it in a `.dmg`
+  with [create-dmg](https://github.com/create-dmg/create-dmg) for distribution.
+- **Windows**: wrap `dashboard-desktop.exe` in an installer with
+  [Inno Setup](https://jrsoftware.org/isinfo.php) or
+  [NSIS](https://nsis.sourceforge.io/) to get a Start Menu entry and
+  Add/Remove Programs listing.
+- **Linux**: package the executable as an
+  [AppImage](https://appimage.org/) (with appimagetool) or a `.deb`/`.rpm`;
+  AppImage is the closest equivalent to the no-install single file.
+
+Closing the app: click the window's close button or press Cmd+W — this shuts
+down the hub and stops all running dashboards. (Cmd+Q is not wired up by
+pywebview on macOS.)
+
+Limitations:
+
+- The `backlog` CLI is still required on `PATH`; only the hub is bundled.
+- pywebview uses the OS webview: WebView2 (Windows), WKWebView (macOS),
+  WebKitGTK (Linux — install `webkit2gtk` via your package manager).
+- The executable is unsigned: macOS Gatekeeper and Windows SmartScreen will
+  warn on first run (right-click → Open on macOS). Code signing/notarization
+  is not set up yet.
+
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
 | `dashboard-server` | Run the hub UI on port 17686 |
+| `dashboard-desktop` | Run the hub UI in a native desktop window (requires `pywebview`) |
 | `dashboard-hub add NAME PATH` | Register a project with `backlog/config.yml` |
 | `dashboard-hub list` | List configured projects and running status |
 | `dashboard-hub open ID` | Open Backlog browser, starting it if needed |
