@@ -24,6 +24,27 @@ Entry scripts in `bin/`:
 - `backlog` CLI available on PATH (install via `npm i -g backlog.md` or `brew install backlog-md`)
 - No Python package manager is used; keep the stdlib-only dependency surface unless there is a strong reason to add one.
 
+## Cross-platform notes
+
+The hub runs on macOS, Linux, and Windows. Platform-specific code is isolated behind
+`sys.platform == "win32"` branches rather than separate modules:
+
+- `dashboard_hub/config.py` — config/state dirs use `%APPDATA%`/`%LOCALAPPDATA%` on
+  Windows, XDG paths (`~/.config`, `~/.local/share`) elsewhere.
+- `dashboard_hub/registry.py` — process liveness, process-tree walking, and
+  listening-port lookup each have a Windows implementation (`ctypes`
+  Toolhelp32Snapshot, `netstat -ano`) alongside the POSIX one (`ps`, `/proc`,
+  `lsof`). File locking uses `msvcrt.locking` on Windows and `fcntl.flock`
+  elsewhere. `signal.SIGKILL` doesn't exist on Windows — termination falls
+  back to `SIGTERM` (which maps to `TerminateProcess`).
+- `dashboard_hub/backlog_browser.py` — detached process spawning uses
+  `start_new_session=True` on POSIX and `CREATE_NEW_PROCESS_GROUP |
+  DETACHED_PROCESS` on Windows (`start_new_session` isn't supported there).
+- `bin/` has both POSIX shell scripts and `.cmd` equivalents
+  (`dash.cmd`, `dashboard-hub.cmd`, `dashboard-server.cmd`).
+- On Windows, run commands with `python` rather than `python3` — the `python3`
+  alias is often an inactive Microsoft Store shim.
+
 ## Key files
 
 | File | Purpose |

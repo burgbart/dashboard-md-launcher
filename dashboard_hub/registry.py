@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
@@ -8,6 +7,7 @@ import signal
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -15,6 +15,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import STATE_DIR, ensure_dirs
+
+WINDOWS = sys.platform == "win32"
+
+if WINDOWS:
+    import msvcrt
+else:
+    import fcntl
 
 REGISTRY_PATH = STATE_DIR / "instances.json"
 REGISTRY_LOCK_PATH = STATE_DIR / ".instances.lock"
@@ -79,26 +86,72 @@ def save_registry(instances: list[RunningInstance]) -> None:
     )
 
 
+def _acquire_lock(lock_file) -> None:
+    if WINDOWS:
+        lock_file.seek(0)
+        while True:
+            try:
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                time.sleep(0.05)
+    else:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+
+def _release_lock(lock_file) -> None:
+    if WINDOWS:
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 @contextmanager
 def _registry_lock():
     """Serialize registry read-modify-write across hub threads and CLI processes."""
     ensure_dirs()
     REGISTRY_LOCK_PATH.touch(exist_ok=True)
-    with open(REGISTRY_LOCK_PATH, "w", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    if WINDOWS and REGISTRY_LOCK_PATH.stat().st_size == 0:
+        # msvcrt.locking needs at least one byte to lock.
+        REGISTRY_LOCK_PATH.write_bytes(b"\0")
+    mode = "r+b" if WINDOWS else "w"
+    with open(REGISTRY_LOCK_PATH, mode) as lock_file:
+        _acquire_lock(lock_file)
         try:
             yield
         finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            _release_lock(lock_file)
 
 
 def _healthy_instances(host: str = "127.0.0.1") -> list[RunningInstance]:
     return [item for item in load_registry() if instance_healthy(item, host)]
 
 
+def _win_pid_alive(pid: int) -> bool:
+    import ctypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        exit_code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return False
+        return exit_code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if WINDOWS:
+        return _win_pid_alive(pid)
     try:
         waited_pid, _ = os.waitpid(pid, os.WNOHANG)
         if waited_pid == pid:
@@ -120,26 +173,72 @@ def port_open(host: str, port: int, timeout: float = 0.2) -> bool:
         return False
 
 
+def _win_process_parents() -> dict[int, int]:
+    """Return {pid: parent_pid} for all processes via a Toolhelp32 snapshot."""
+    import ctypes
+    from ctypes import wintypes
+
+    TH32CS_SNAPPROCESS = 0x00000002
+    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+    class PROCESSENTRY32(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", ctypes.c_long),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", ctypes.c_char * 260),
+        ]
+
+    kernel32 = ctypes.windll.kernel32
+    snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if snapshot in (0, INVALID_HANDLE_VALUE):
+        return {}
+
+    parents: dict[int, int] = {}
+    try:
+        entry = PROCESSENTRY32()
+        entry.dwSize = ctypes.sizeof(PROCESSENTRY32)
+        if not kernel32.Process32First(snapshot, ctypes.byref(entry)):
+            return {}
+        while True:
+            parents[entry.th32ProcessID] = entry.th32ParentProcessID
+            if not kernel32.Process32Next(snapshot, ctypes.byref(entry)):
+                break
+    finally:
+        kernel32.CloseHandle(snapshot)
+    return parents
+
+
 def process_tree_pids(root_pid: int) -> set[int]:
     """Return a process and all of its descendants."""
-    try:
-        result = subprocess.run(
-            ["ps", "-axo", "pid=,ppid="],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return {root_pid} if pid_alive(root_pid) else set()
-
     children: dict[int, list[int]] = {}
-    for line in result.stdout.splitlines():
+    if WINDOWS:
+        for pid, parent in _win_process_parents().items():
+            children.setdefault(parent, []).append(pid)
+    else:
         try:
-            pid_text, parent_text = line.split()
-            pid, parent = int(pid_text), int(parent_text)
-        except (ValueError, TypeError):
-            continue
-        children.setdefault(parent, []).append(pid)
+            result = subprocess.run(
+                ["ps", "-axo", "pid=,ppid="],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            return {root_pid} if pid_alive(root_pid) else set()
+
+        for line in result.stdout.splitlines():
+            try:
+                pid_text, parent_text = line.split()
+                pid, parent = int(pid_text), int(parent_text)
+            except (ValueError, TypeError):
+                continue
+            children.setdefault(parent, []).append(pid)
 
     tree: set[int] = set()
     pending = [root_pid]
@@ -176,8 +275,39 @@ def process_cwd(pid: int) -> Path | None:
     return None
 
 
+def _win_listening_pids(port: int) -> set[int]:
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano", "-p", "TCP"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return set()
+
+    pids: set[int] = set()
+    target = str(port)
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) < 5 or fields[0] != "TCP":
+            continue
+        local_addr, state, pid_text = fields[1], fields[3], fields[-1]
+        if state != "LISTENING":
+            continue
+        if local_addr.rsplit(":", 1)[-1] != target:
+            continue
+        try:
+            pids.add(int(pid_text))
+        except ValueError:
+            continue
+    return pids
+
+
 def listening_pids(port: int) -> set[int]:
-    """Return PIDs listening on a TCP port using lsof or Linux procfs."""
+    """Return PIDs listening on a TCP port using lsof, Linux procfs, or netstat."""
+    if WINDOWS:
+        return _win_listening_pids(port)
     if shutil.which("lsof"):
         try:
             result = subprocess.run(
@@ -235,10 +365,19 @@ def listening_pids(port: int) -> set[int]:
 
 
 def process_owns_port(root_pid: int, port: int, project_path: str | Path) -> bool:
+    """Return True if a descendant of root_pid is listening on port.
+
+    When the process cwd cannot be determined (e.g. no /proc, lsof, or PEB
+    access on Windows), fall back to trusting tree membership alone, since
+    root_pid is a process we spawned ourselves for this project.
+    """
     expected_path = Path(project_path).resolve()
     tree = process_tree_pids(root_pid)
     for pid in listening_pids(port):
-        if pid in tree and process_cwd(pid) == expected_path:
+        if pid not in tree:
+            continue
+        cwd = process_cwd(pid)
+        if cwd is None or cwd == expected_path:
             return True
     return False
 
@@ -348,12 +487,13 @@ def terminate_process_tree(root_pid: int, timeout: float = 5.0) -> None:
         except OSError:
             pass
 
+    kill_signal = getattr(signal, "SIGKILL", signal.SIGTERM)
     deadline = time.time() + timeout
     while time.time() < deadline and any(pid_alive(pid) for pid in pids):
         time.sleep(0.05)
     for pid in pids:
         if pid_alive(pid):
             try:
-                os.kill(pid, signal.SIGKILL)
+                os.kill(pid, kill_signal)
             except OSError:
                 pass

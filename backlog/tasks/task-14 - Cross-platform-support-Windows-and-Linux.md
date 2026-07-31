@@ -1,7 +1,7 @@
 ---
 id: TASK-14
 title: 'Cross-platform support: Windows and Linux'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-31 12:40'
 labels: []

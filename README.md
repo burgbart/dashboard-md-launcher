@@ -17,9 +17,11 @@ Each project uses a `backlog/` folder (from `backlog init`). The hub embeds the 
 
 - Python 3.9+
 - [Backlog.md CLI](https://github.com/MrLesk/Backlog.md) on your `PATH`
-- macOS or Linux
+- macOS, Linux, or Windows
 
 ## Install
+
+macOS / Linux:
 
 ```bash
 git clone git@github.com:burgbart/dashboard-md-launcher.git
@@ -29,6 +31,17 @@ chmod +x bin/*
 ln -sf "$(pwd)/bin/dashboard-server" ~/.local/bin/dashboard-server
 ln -sf "$(pwd)/bin/dashboard-hub" ~/.local/bin/dashboard-hub
 ln -sf "$(pwd)/bin/dash" ~/.local/bin/dash
+```
+
+Windows (PowerShell):
+
+```powershell
+git clone git@github.com:burgbart/dashboard-md-launcher.git
+cd dashboard-md-launcher
+
+# Add the bin\ folder (with dashboard-server.cmd, dashboard-hub.cmd, dash.cmd) to PATH,
+# or run the commands directly with python -m dashboard_hub ...
+$env:Path += ";$PWD\bin"
 ```
 
 Optional hosts entry:
@@ -77,10 +90,10 @@ dashboard-server
 
 ## Config
 
-| File | Purpose |
-|------|---------|
-| `~/.config/dashboard-hub/dashboards.json` | Registered projects |
-| `~/.local/share/dashboard-hub/instances.json` | Running browser instances |
+| File | macOS / Linux | Windows |
+|------|---------------|---------|
+| Registered projects | `~/.config/dashboard-hub/dashboards.json` | `%APPDATA%\dashboard-hub\dashboards.json` |
+| Running browser instances | `~/.local/share/dashboard-hub/instances.json` | `%LOCALAPPDATA%\dashboard-hub\instances.json` |
 
 Example config:
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -149,7 +150,47 @@ def cmd_open(args: argparse.Namespace) -> None:
     print(url)
 
 
+def _win_backlog_browser_roots() -> list[tuple[int, Path | None]]:
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_Process | "
+                "Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        data = json.loads(result.stdout or "[]")
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return []
+
+    if isinstance(data, dict):
+        data = [data]
+
+    processes: dict[int, int] = {}
+    matches: set[int] = set()
+    for item in data:
+        pid, parent, cmdline = item.get("ProcessId"), item.get("ParentProcessId"), item.get("CommandLine") or ""
+        if pid is None or parent is None:
+            continue
+        pid, parent = int(pid), int(parent)
+        processes[pid] = parent
+        if "backlog" in cmdline and "browser" in cmdline:
+            matches.add(pid)
+
+    roots = [pid for pid in matches if processes.get(pid) not in processes]
+    return [(pid, process_cwd(pid)) for pid in sorted(roots)]
+
+
 def _backlog_browser_roots() -> list[tuple[int, Path | None]]:
+    if sys.platform == "win32":
+        return _win_backlog_browser_roots()
+
     try:
         result = subprocess.run(
             ["ps", "-axo", "pid=,ppid=,command="],

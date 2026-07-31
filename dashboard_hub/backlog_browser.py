@@ -4,10 +4,20 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import webbrowser
 from pathlib import Path
+
+WINDOWS = sys.platform == "win32"
+
+if WINDOWS:
+    _DETACH_KWARGS = {
+        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    }
+else:
+    _DETACH_KWARGS = {"start_new_session": True}
 
 from .config import DashboardEntry, load_config, save_config
 from .registry import (
@@ -165,7 +175,7 @@ def spawn_backlog_browser(entry: DashboardEntry, port: int | None = None) -> sub
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        start_new_session=True,
+        **_DETACH_KWARGS,
     )
 
 

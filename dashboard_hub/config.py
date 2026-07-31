@@ -3,12 +3,26 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".config" / "dashboard-hub"
+
+def _app_dirs() -> tuple[Path, Path]:
+    """Return (config_dir, state_dir) for the current platform."""
+    if sys.platform == "win32":
+        appdata = Path(os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming")))
+        local_appdata = Path(
+            os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
+        )
+        return appdata / "dashboard-hub", local_appdata / "dashboard-hub"
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
+    data_home = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share")))
+    return config_home / "dashboard-hub", data_home / "dashboard-hub"
+
+
+CONFIG_DIR, STATE_DIR = _app_dirs()
 CONFIG_PATH = CONFIG_DIR / "dashboards.json"
-STATE_DIR = Path.home() / ".local" / "share" / "dashboard-hub"
 
 DEFAULT_CONFIG = {
     "hub": {"host": "127.0.0.1", "port": 17686},

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Windows support: `%APPDATA%`/`%LOCALAPPDATA%` config/state dirs, `bin/*.cmd` launchers
+- Windows implementations of process liveness, process-tree walking, and
+  listening-port lookup (`ctypes` Toolhelp32Snapshot, `netstat -ano`) alongside
+  the existing macOS/Linux `ps`/`/proc`/`lsof` code paths
+- Cross-platform registry file locking (`msvcrt.locking` on Windows, `fcntl.flock` elsewhere)
+
+### Fixed
+
+- Detached process spawning now uses Windows-compatible `CREATE_NEW_PROCESS_GROUP |
+  DETACHED_PROCESS` flags instead of the POSIX-only `start_new_session`
+- Process termination falls back to `SIGTERM` where `SIGKILL` isn't available (Windows)
+
 ## [0.4.0] - 2026-07-24
 
 ### Added
