@@ -21,16 +21,25 @@ Each project uses a `backlog/` folder (from `backlog init`). The hub embeds the 
 
 ## Install
 
-macOS / Linux:
+These steps make `dashboard-server`, `dashboard-hub`, and `dash` runnable from any
+terminal — any directory, any new shell — on macOS, Linux, or Windows, by installing
+small launcher shims into `~/.local/bin` (`%USERPROFILE%\.local\bin` on Windows) and
+ensuring that directory is on your `PATH`.
+
+macOS / Linux (bash/zsh):
 
 ```bash
 git clone git@github.com:burgbart/dashboard-md-launcher.git
 cd dashboard-md-launcher
 chmod +x bin/*
 
+mkdir -p ~/.local/bin
 ln -sf "$(pwd)/bin/dashboard-server" ~/.local/bin/dashboard-server
 ln -sf "$(pwd)/bin/dashboard-hub" ~/.local/bin/dashboard-hub
 ln -sf "$(pwd)/bin/dash" ~/.local/bin/dash
+
+# Make sure ~/.local/bin is on PATH (add to ~/.bashrc or ~/.zshrc if not already):
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 ```
 
 Windows (PowerShell):
@@ -39,10 +48,14 @@ Windows (PowerShell):
 git clone git@github.com:burgbart/dashboard-md-launcher.git
 cd dashboard-md-launcher
 
-# Add the bin\ folder (with dashboard-server.cmd, dashboard-hub.cmd, dash.cmd) to PATH,
-# or run the commands directly with python -m dashboard_hub ...
-$env:Path += ";$PWD\bin"
+# Installs shims into %USERPROFILE%\.local\bin and adds that folder to your
+# User PATH permanently (persists across new terminal sessions).
+.\bin\install.ps1
 ```
+
+Open a new terminal after either install step so the updated `PATH` takes effect.
+Verify with `dashboard-server --help` (or `Get-Command dashboard-server` on Windows)
+from any directory.
 
 Optional hosts entry:
 
