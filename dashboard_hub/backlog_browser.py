@@ -13,11 +13,48 @@ from pathlib import Path
 WINDOWS = sys.platform == "win32"
 
 if WINDOWS:
+    # CREATE_NO_WINDOW suppresses a console for our immediate child (the
+    # backlog.cmd shim / node.exe), but node.exe re-spawns its own child
+    # process (a compiled backlog.exe) without any creation flags of its
+    # own. Since node.exe has no console (because of our flag), Windows
+    # auto-allocates a fresh one for that grandchild per default CreateProcess
+    # behavior. We can't pass flags into a spawn we don't control, so
+    # _suppress_windows_console polls for and hides that window afterward.
     _DETACH_KWARGS = {
-        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
     }
 else:
     _DETACH_KWARGS = {"start_new_session": True}
+
+
+def _suppress_windows_console(root_pid: int, attempts: int = 50, interval: float = 0.1) -> None:
+    """Hide any console window opened by a descendant of root_pid (Windows only)."""
+    import ctypes
+    from ctypes import wintypes
+
+    from .registry import process_tree_pids
+
+    user32 = ctypes.windll.user32
+    SW_HIDE = 0
+    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+    for _ in range(attempts):
+        pids = process_tree_pids(root_pid)
+        hidden = False
+
+        def _callback(hwnd, _lparam, _pids=pids):
+            nonlocal hidden
+            owner_pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
+            if owner_pid.value in _pids and user32.IsWindowVisible(hwnd):
+                user32.ShowWindow(hwnd, SW_HIDE)
+                hidden = True
+            return True
+
+        user32.EnumWindows(WNDENUMPROC(_callback), 0)
+        if hidden:
+            return
+        time.sleep(interval)
 
 from .config import DashboardEntry, load_config, save_config
 from .registry import (
@@ -163,7 +200,7 @@ def spawn_backlog_browser(entry: DashboardEntry, port: int | None = None) -> sub
     env = os.environ.copy()
     env["BACKLOG_CWD"] = str(entry.path)
 
-    return subprocess.Popen(
+    process = subprocess.Popen(
         [
             backlog_binary(),
             "browser",
@@ -177,6 +214,11 @@ def spawn_backlog_browser(entry: DashboardEntry, port: int | None = None) -> sub
         stderr=subprocess.DEVNULL,
         **_DETACH_KWARGS,
     )
+    if WINDOWS:
+        threading.Thread(
+            target=_suppress_windows_console, args=(process.pid,), daemon=True
+        ).start()
+    return process
 
 
 def run_backlog_browser(

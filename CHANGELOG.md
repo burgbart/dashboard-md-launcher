@@ -18,8 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Detached process spawning now uses Windows-compatible `CREATE_NEW_PROCESS_GROUP |
-  DETACHED_PROCESS` flags instead of the POSIX-only `start_new_session`
+  CREATE_NO_WINDOW` flags instead of the POSIX-only `start_new_session`
 - Process termination falls back to `SIGTERM` where `SIGKILL` isn't available (Windows)
+- Opening a dashboard on Windows no longer flashes a console window: node.exe
+  re-spawns its own child process without inheriting our no-window flag, so a
+  background thread now polls for and hides that window right after launch
+- `bin/install.ps1` installs `.cmd` shims into `%USERPROFILE%\.local\bin` and
+  persists that directory on the User `PATH`, so `dashboard-server`,
+  `dashboard-hub`, and `dash` work from any terminal on any platform
 
 ## [0.4.0] - 2026-07-24
 
